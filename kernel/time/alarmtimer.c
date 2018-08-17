@@ -25,10 +25,11 @@
 #include <linux/posix-timers.h>
 #include <linux/workqueue.h>
 #include <linux/freezer.h>
-#include "lpm-levels.h"
-#define ALARM_DELTA 120
 #include <linux/workqueue.h>
 
+#ifdef CONFIG_MSM_PM
+#include "lpm-levels.h"
+#endif
 
 /**
  * struct alarm_base - Alarm timer bases
@@ -134,10 +135,8 @@ void set_power_on_alarm(void)
 	 * It is to make sure that alarm time will be always
 	 * bigger than wall time.
 	 */
-
 	if (alarm_secs <= wall_time.tv_sec + 1)
 		goto disable_alarm;
-
 
 	rtc = alarmtimer_get_rtcdev();
 	if (!rtc)
@@ -147,11 +146,6 @@ void set_power_on_alarm(void)
 	rtc_tm_to_time(&rtc_time, &rtc_secs);
 	alarm_delta = wall_time.tv_sec - rtc_secs;
 	alarm_time = alarm_secs - alarm_delta;
-
-	if ((alarm_time - ALARM_DELTA) > rtc_secs)
-			alarm_time -= ALARM_DELTA;
-	else
-		goto disable_alarm;
 
 	rtc_time_to_tm(alarm_time, &alarm.time);
 	alarm.enabled = 1;

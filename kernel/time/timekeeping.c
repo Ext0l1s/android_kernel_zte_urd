@@ -491,6 +491,7 @@ int do_settimeofday(const struct timespec *tv)
 	struct timekeeper *tk = &timekeeper;
 	struct timespec ts_delta, xt;
 	unsigned long flags;
+	int ret = 0;
 
 	if (!timespec_valid_strict(tv))
 		return -EINVAL;
@@ -504,10 +505,15 @@ int do_settimeofday(const struct timespec *tv)
 	ts_delta.tv_sec = tv->tv_sec - xt.tv_sec;
 	ts_delta.tv_nsec = tv->tv_nsec - xt.tv_nsec;
 
+	if (timespec_compare(&tk->wall_to_monotonic, &ts_delta) > 0) {
+		ret = -EINVAL;
+		goto out;
+	}
+
 	tk_set_wall_to_mono(tk, timespec_sub(tk->wall_to_monotonic, ts_delta));
 
 	tk_set_xtime(tk, tv);
-
+out:
 	timekeeping_update(tk, true, true);
 
 	write_seqcount_end(&timekeeper_seq);
@@ -516,7 +522,7 @@ int do_settimeofday(const struct timespec *tv)
 	/* signal hrtimers about time change */
 	clock_was_set();
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL(do_settimeofday);
 
@@ -543,7 +549,8 @@ int timekeeping_inject_offset(struct timespec *ts)
 
 	/* Make sure the proposed value is valid */
 	tmp = timespec_add(tk_xtime(tk),  *ts);
-	if (!timespec_valid_strict(&tmp)) {
+	if (timespec_compare(&tk->wall_to_monotonic, ts) > 0 ||
+	    !timespec_valid_strict(&tmp)) {
 		ret = -EINVAL;
 		goto error;
 	}
@@ -1340,19 +1347,13 @@ static inline void old_vsyscall_fixup(struct timekeeper *tk)
 #define old_vsyscall_fixup(tk)
 #endif
 
-#if 1 // zte_dbg_timestamp, 20160126, currently a issue with timestamp abnroal large, so track it here
-volatile cycle_t zte_dbg_tick_counter_last_cycle = 0;	// always update first
-volatile cycle_t zte_dbg_tick_counter_change_cur = 0xFFFFFFFFFFFFFFFF; // always update first
-volatile cycle_t zte_dbg_tick_counter_change_max = 0;
-volatile u64 zte_dbg_tick_counter_val_1_for_max = 0xFFFFFFFFFFFFFFFF;
-volatile u64 zte_dbg_tick_counter_val_2_for_max = 0xFFFFFFFFFFFFFFFF;
-#endif
+
 
 /**
  * update_wall_time - Uses the current clocksource to increment the wall time
  *
  */
-void update_wall_time(void)
+static void update_wall_time(void)
 {
 	struct clocksource *clock;
 	struct timekeeper *real_tk = &timekeeper;
@@ -1374,17 +1375,6 @@ void update_wall_time(void)
 	offset = real_tk->cycle_interval;
 #else
 	offset = (clock->read(clock) - clock->cycle_last) & clock->mask;
-#endif
-
-#if 1 // zte_dbg_timestamp, 20160126, currently a issue with timestamp abnroal large, so track it here
-	zte_dbg_tick_counter_last_cycle = clock->read(clock); // actually a little more than offset computing
-	zte_dbg_tick_counter_change_cur = offset;
-	if(zte_dbg_tick_counter_change_cur > zte_dbg_tick_counter_change_max)
-	{
-		zte_dbg_tick_counter_change_max = zte_dbg_tick_counter_change_cur;
-		zte_dbg_tick_counter_val_2_for_max = zte_dbg_tick_counter_last_cycle;
-		zte_dbg_tick_counter_val_1_for_max = clock->cycle_last;
-	}	
 #endif
 
 	/* Check if there's really nothing to do */
@@ -1536,16 +1526,6 @@ void monotonic_to_bootbased(struct timespec *ts)
 	*ts = timespec_add(*ts, tk->total_sleep_time);
 }
 EXPORT_SYMBOL_GPL(monotonic_to_bootbased);
-#ifndef CONFIG_ZTE_PLATFORM_SLEEPTIME
-#define CONFIG_ZTE_PLATFORM_SLEEPTIME 1
-#endif
-#ifdef CONFIG_ZTE_PLATFORM_SLEEPTIME
-void zte_get_total_suspend(struct timespec *ts)
-{
-	*ts =  timekeeper.total_sleep_time;
-}
-EXPORT_SYMBOL_GPL(zte_get_total_suspend);
-#endif
 
 unsigned long get_seconds(void)
 {
@@ -1596,18 +1576,13 @@ struct timespec get_monotonic_coarse(void)
 	return now;
 }
 
-#if 1 // zte_dbg_timestamp, 20160121
-volatile u64 zte_dbg_jiffies_ticks = 0;
-#endif
 /*
  * Must hold jiffies_lock
  */
 void do_timer(unsigned long ticks)
 {
 	jiffies_64 += ticks;
-#if 1 // zte_dbg_timestamp, 20160121
-	zte_dbg_jiffies_ticks += ticks;
-#endif
+	update_wall_time();
 	calc_global_load(ticks);
 }
 
@@ -1764,5 +1739,4 @@ void xtime_update(unsigned long ticks)
 	write_seqlock(&jiffies_lock);
 	do_timer(ticks);
 	write_sequnlock(&jiffies_lock);
-	update_wall_time();
 }

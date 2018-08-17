@@ -613,7 +613,6 @@ extern int tcp_mss_to_mtu(struct sock *sk, int mss);
 extern void tcp_mtup_init(struct sock *sk);
 extern void tcp_valid_rtt_meas(struct sock *sk, u32 seq_rtt);
 extern void tcp_init_buffer_space(struct sock *sk);
-extern size_t print_time(struct timespec ts, char *buf);   //ZTE_LC_TCP_DEBUG, 20151230
 
 static inline void tcp_bound_rto(const struct sock *sk)
 {
@@ -1059,6 +1058,8 @@ extern void tcp_set_state(struct sock *sk, int state);
 
 extern void tcp_done(struct sock *sk);
 
+int tcp_abort(struct sock *sk, int err);
+
 static inline void tcp_sack_reset(struct tcp_options_received *rx_opt)
 {
 	rx_opt->dsack = 0;
@@ -1408,6 +1409,8 @@ static inline void tcp_check_send_head(struct sock *sk, struct sk_buff *skb_unli
 {
 	if (sk->sk_send_head == skb_unlinked)
 		sk->sk_send_head = NULL;
+	if (tcp_sk(sk)->highest_sack == skb_unlinked)
+		tcp_sk(sk)->highest_sack = NULL;
 }
 
 static inline void tcp_init_send_head(struct sock *sk)

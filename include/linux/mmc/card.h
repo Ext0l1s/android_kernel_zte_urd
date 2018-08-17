@@ -114,9 +114,6 @@ struct mmc_ext_csd {
 	u8			raw_trim_mult;		/* 232 */
 	u8			raw_bkops_status;	/* 246 */
 	u8			raw_sectors[4];		/* 212 - 4 bytes */
-	u8			life_time_est_type_a;	/* 268 */
-	u8			life_time_est_type_b;	/* 269 */
-	u8			pre_eol_info;		/* 267 */
 	u8			cmdq_depth;		/* 307 */
 	u8			cmdq_support;		/* 308 */
 
@@ -386,9 +383,8 @@ struct mmc_card {
 #define MMC_QUIRK_CACHE_DISABLE (1 << 14)       /* prevent cache enable */
 #define MMC_QUIRK_QCA6574_SETTINGS (1 << 15)	/* QCA6574 card settings*/
 #define MMC_QUIRK_QCA9377_SETTINGS (1 << 16)	/* QCA9377 card settings*/
-
 /* Make sure CMDQ is empty before queuing DCMD */
-#define MMC_QUIRK_CMDQ_EMPTY_BEFORE_DCMD (1 << 15)
+#define MMC_QUIRK_CMDQ_EMPTY_BEFORE_DCMD (1 << 17)
 
 	unsigned int		erase_size;	/* erase size in sectors */
  	unsigned int		erase_shift;	/* if erase unit is power 2 */

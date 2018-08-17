@@ -612,12 +612,9 @@ int snd_soc_suspend(struct device *dev)
 					  SND_SOC_DAPM_STREAM_SUSPEND);
 	}
 
-// chenjun:NO need suspend
-#if 0
 	/* Recheck all analogue paths too */
 	dapm_mark_io_dirty(&card->dapm);
 	snd_soc_dapm_sync(&card->dapm);
-#endif
 
 	/* suspend all CODECs */
 	list_for_each_entry(codec, &card->codec_dev_list, card_list) {
@@ -772,13 +769,9 @@ static void soc_resume_deferred(struct work_struct *work)
 	/* userspace can access us now we are back as we were before */
 	snd_power_change_state(card->snd_card, SNDRV_CTL_POWER_D0);
 
-// chenjun:NO need suspend
-#if 0
 	/* Recheck all analogue paths too */
 	dapm_mark_io_dirty(&card->dapm);
 	snd_soc_dapm_sync(&card->dapm);
-#endif
-
 }
 
 /* powers up audio subsystem after a suspend */
@@ -2126,10 +2119,13 @@ unsigned int snd_soc_read(struct snd_soc_codec *codec, unsigned int reg)
 {
 	unsigned int ret;
 
-	ret = codec->read(codec, reg);
-	dev_dbg(codec->dev, "read %x => %x\n", reg, ret);
-	trace_snd_soc_reg_read(codec, reg, ret);
-
+	if (codec->read) {
+		ret = codec->read(codec, reg);
+		dev_dbg(codec->dev, "read %x => %x\n", reg, ret);
+		trace_snd_soc_reg_read(codec, reg, ret);
+	} else {
+		ret = -EIO;
+	}
 	return ret;
 }
 EXPORT_SYMBOL_GPL(snd_soc_read);
@@ -2137,9 +2133,13 @@ EXPORT_SYMBOL_GPL(snd_soc_read);
 unsigned int snd_soc_write(struct snd_soc_codec *codec,
 			   unsigned int reg, unsigned int val)
 {
-	dev_dbg(codec->dev, "write %x = %x\n", reg, val);
-	trace_snd_soc_reg_write(codec, reg, val);
-	return codec->write(codec, reg, val);
+	if (codec->write) {
+		dev_dbg(codec->dev, "write %x = %x\n", reg, val);
+		trace_snd_soc_reg_write(codec, reg, val);
+		return codec->write(codec, reg, val);
+	} else {
+		return -EIO;
+	}
 }
 EXPORT_SYMBOL_GPL(snd_soc_write);
 

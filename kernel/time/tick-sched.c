@@ -45,32 +45,15 @@ DEFINE_PER_CPU(struct tick_sched, tick_cpu_sched);
  */
 static ktime_t last_jiffies_update;
 
-/*
- * Conversion from ktime to sched_clock is error prone. Use this
- * as a safetly margin when calculating the sched_clock value at
- * a particular jiffy as last_jiffies_update uses ktime.
- */
-#define SCHED_CLOCK_MARGIN 100000
-
-static u64 ns_since_jiffy(void)
-{
-	ktime_t delta;
-
-	delta = ktime_sub(ktime_get(), last_jiffies_update);
-
-	return ktime_to_ns(delta);
-}
-
-u64 jiffy_to_sched_clock(u64 *now, u64 *jiffy_sched_clock)
+u64 jiffy_to_ktime_ns(u64 *now, u64 *jiffy_ktime_ns)
 {
 	u64 cur_jiffies;
 	unsigned long seq;
 
 	do {
 		seq = read_seqbegin(&jiffies_lock);
-		*now = sched_clock();
-		*jiffy_sched_clock = *now -
-			(ns_since_jiffy() + SCHED_CLOCK_MARGIN);
+		*now = ktime_to_ns(ktime_get());
+		*jiffy_ktime_ns = ktime_to_ns(last_jiffies_update);
 		cur_jiffies = get_jiffies_64();
 	} while (read_seqretry(&jiffies_lock, seq));
 
@@ -82,11 +65,6 @@ struct tick_sched *tick_get_tick_sched(int cpu)
 	return &per_cpu(tick_cpu_sched, cpu);
 }
 
-#if 1 // zte_dbg_timestamp, 20160121, below two should no offset more than 1
-volatile u64 zte_dbg_tick_do_update_jiffies64_seq_enter = 0;
-volatile u64 zte_dbg_tick_do_update_jiffies64_seq_exit = 0;
-volatile ktime_t zte_dbg_tick_do_update_jiffies64_cycle = { .tv64 = 0 };
-#endif
 /*
  * Must be called with interrupts disabled !
  */
@@ -104,11 +82,6 @@ static void tick_do_update_jiffies64(ktime_t now)
 
 	/* Reevalute with jiffies_lock held */
 	write_seqlock(&jiffies_lock);
-
-#if 1 // zte_dbg_timestamp, 20160121
-	zte_dbg_tick_do_update_jiffies64_seq_enter++;
-	zte_dbg_tick_do_update_jiffies64_cycle = now;
-#endif
 
 	delta = ktime_sub(now, last_jiffies_update);
 	if (delta.tv64 >= tick_period.tv64) {
@@ -131,11 +104,7 @@ static void tick_do_update_jiffies64(ktime_t now)
 		/* Keep the tick_next_period variable up to date */
 		tick_next_period = ktime_add(last_jiffies_update, tick_period);
 	}
-#if 1 // zte_dbg_timestamp, 20160121
-	zte_dbg_tick_do_update_jiffies64_seq_exit++;
-#endif
 	write_sequnlock(&jiffies_lock);
-	update_wall_time();
 }
 
 /*

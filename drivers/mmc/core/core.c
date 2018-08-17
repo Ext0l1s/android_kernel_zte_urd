@@ -284,14 +284,6 @@ void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
 				}
 			}
 #endif
-#ifdef CONFIG_TASKSTATS
-                        diff = ktime_sub(ktime_get(), host->perf.last_check);
-                        if (ktime_to_us(diff) >= 1000000 ){
-                                host->perf.last_check = ktime_get();
-                                trace_mmc_blk_rw_summary(host->perf.rbytes_drv, ktime_to_us(host->perf.rtime_drv),
-                                          host->perf.wbytes_drv, ktime_to_us(host->perf.wtime_drv));
-                        }
-#endif
 			pr_debug("%s:     %d bytes transferred: %d\n",
 				mmc_hostname(host),
 				mrq->data->bytes_xfered, mrq->data->error);
@@ -1053,10 +1045,10 @@ EXPORT_SYMBOL(mmc_cmdq_discard_queue);
  *	@tag: the request tag.
  *	@err: non-zero is error, success otherwise
  */
-void mmc_cmdq_post_req(struct mmc_host *host, int tag, int err)
+void mmc_cmdq_post_req(struct mmc_host *host, int tag, int err, bool is_dcmd)
 {
 	if (likely(host->cmdq_ops->post_req))
-		host->cmdq_ops->post_req(host, tag, err);
+		host->cmdq_ops->post_req(host, tag, err, is_dcmd);
 }
 EXPORT_SYMBOL(mmc_cmdq_post_req);
 
@@ -1085,6 +1077,8 @@ int mmc_cmdq_halt(struct mmc_host *host, bool halt)
 	mmc_host_clk_hold(host);
 	if (host->cmdq_ops->halt) {
 		err = host->cmdq_ops->halt(host, halt);
+		if (!err && host->ops->notify_halt)
+			host->ops->notify_halt(host, halt);
 		if (!err && halt)
 			mmc_host_set_halt(host);
 		else if (!err && !halt)
@@ -1284,10 +1278,6 @@ EXPORT_SYMBOL(mmc_start_req);
  */
 void mmc_wait_for_req(struct mmc_host *host, struct mmc_request *mrq)
 {
-#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
-	if (mmc_bus_needs_resume(host))
-		mmc_resume_bus(host);
-#endif
 	__mmc_start_req(host, mrq);
 	mmc_wait_for_req_done(host, mrq);
 }
@@ -2446,11 +2436,15 @@ static inline void mmc_bus_put(struct mmc_host *host)
 int mmc_resume_bus(struct mmc_host *host)
 {
 	unsigned long flags;
+	int err = 0;
 
-	if (!mmc_bus_needs_resume(host))
+	mmc_claim_host(host);
+
+	if (!mmc_bus_needs_resume(host)) {
+		mmc_release_host(host);
 		return -EINVAL;
+	}
 
-	printk("%s: Starting deferred resume\n", mmc_hostname(host));
 	spin_lock_irqsave(&host->lock, flags);
 	host->bus_resume_flags &= ~MMC_BUSRESUME_NEEDS_RESUME;
 	host->rescan_disable = 0;
@@ -2461,10 +2455,20 @@ int mmc_resume_bus(struct mmc_host *host)
 		mmc_power_up(host);
 		BUG_ON(!host->bus_ops->resume);
 		host->bus_ops->resume(host);
+		if (mmc_card_cmdq(host->card)) {
+			err = mmc_cmdq_halt(host, false);
+			if (err)
+				pr_err("%s: un-halt: failed: %d\n",
+				       __func__, err);
+			else
+				mmc_card_clr_suspended(host->card);
+		}
+		host->dev_status = DEV_RESUMED;
 	}
 
 	mmc_bus_put(host);
-	printk("%s: Deferred resume completed\n", mmc_hostname(host));
+	mmc_release_host(host);
+
 	return 0;
 }
 
@@ -4032,6 +4036,15 @@ int mmc_power_restore_host(struct mmc_host *host)
 }
 EXPORT_SYMBOL(mmc_power_restore_host);
 
+int mmc_power_restore_broken_host(struct mmc_host *host)
+{
+	if (!host->bus_ops || host->bus_dead || !host->bus_ops->power_restore)
+		return -EINVAL;
+
+	return host->bus_ops->power_restore(host);
+}
+EXPORT_SYMBOL(mmc_power_restore_broken_host);
+
 int mmc_card_awake(struct mmc_host *host)
 {
 	int err = -ENOSYS;
@@ -4275,6 +4288,7 @@ int mmc_resume_host(struct mmc_host *host)
 		}
 	}
 	host->pm_flags &= ~MMC_PM_KEEP_POWER;
+	host->pm_flags &= ~MMC_PM_WAKE_SDIO_IRQ;
 	mmc_bus_put(host);
 
 	trace_mmc_resume_host(mmc_hostname(host), err,
@@ -4407,6 +4421,11 @@ void mmc_rpm_hold(struct mmc_host *host, struct device *dev)
 		if (pm_runtime_suspended(dev))
 			BUG_ON(1);
 	}
+
+#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
+	if (mmc_bus_needs_resume(host))
+		mmc_resume_bus(host);
+#endif
 }
 
 EXPORT_SYMBOL(mmc_rpm_hold);

@@ -49,6 +49,7 @@
 #include <asm/fixmap.h>
 #include <asm/cputype.h>
 #include <asm/elf.h>
+#include <asm/cpufeature.h>
 #include <asm/cputable.h>
 #include <asm/cpu_ops.h>
 #include <asm/sections.h>
@@ -61,7 +62,6 @@
 #include <asm/psci.h>
 #include <asm/efi.h>
 
-int emmc_version_5_0 =0;
 unsigned int processor_id;
 EXPORT_SYMBOL(processor_id);
 
@@ -76,9 +76,6 @@ EXPORT_SYMBOL(cold_boot);
 
 char* (*arch_read_hardware_id)(void);
 EXPORT_SYMBOL(arch_read_hardware_id);
-#if 1    //ZTE_XJB_20130216 for power_off charging
-int offcharging_flag=0;
-#endif//ZTE
 
 #ifdef CONFIG_COMPAT
 #define COMPAT_ELF_HWCAP_DEFAULT	\
@@ -93,6 +90,9 @@ unsigned int compat_elf_hwcap2 __read_mostly;
 
 static const char *cpu_name;
 static const char *machine_name;
+#ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
+bool sys_psci_bp_hardening_initialised;
+#endif
 phys_addr_t __fdt_pointer __initdata;
 
 /*
@@ -212,27 +212,46 @@ static void __init smp_build_mpidr_hash(void)
 }
 #endif
 
-static void __init setup_processor(void)
+#ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
+#include <asm/mmu_context.h>
+
+DEFINE_PER_CPU_READ_MOSTLY(struct bp_hardening_data, bp_hardening_data);
+
+static void __maybe_unused __install_bp_hardening_cb(bp_hardening_cb_t fn)
 {
-	struct cpu_info *cpu_info;
+	__this_cpu_write(bp_hardening_data.fn, fn);
+}
+
+static void __maybe_unused install_bp_hardening_cb(bp_hardening_cb_t fn)
+{
+	__install_bp_hardening_cb(fn);
+}
+
+void enable_psci_bp_hardening(void *data)
+{
+	switch(read_cpuid_part_number()) {
+	case ARM_CPU_PART_CORTEX_A57:
+	case ARM_CPU_PART_CORTEX_A72:
+		if (psci_ops.get_version)
+			install_bp_hardening_cb(
+				(bp_hardening_cb_t)psci_ops.get_version);
+		else
+			install_bp_hardening_cb(
+				(bp_hardening_cb_t)psci_apply_bp_hardening);
+	}
+}
+#endif	/* CONFIG_HARDEN_BRANCH_PREDICTOR */
+
+void __init setup_cpu_features(void)
+{
 	u64 features, block;
 	u32 cwg;
 	int cls;
 
-	cpu_info = lookup_processor_type(read_cpuid_id());
-	if (!cpu_info) {
-		printk("CPU configuration botched (ID %08x), unable to continue.\n",
-		       read_cpuid_id());
-		while (1);
-	}
-
-	cpu_name = cpu_info->cpu_name;
-
-	printk("CPU: %s [%08x] revision %d\n",
-	       cpu_name, read_cpuid_id(), read_cpuid_id() & 15);
-
-	sprintf(init_utsname()->machine, ELF_PLATFORM);
-	elf_hwcap = 0;
+#ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
+	on_each_cpu(enable_psci_bp_hardening, NULL, true);
+	sys_psci_bp_hardening_initialised = true;
+#endif
 
 	/*
 	 * Check for sane CTR_EL0.CWG value.
@@ -308,6 +327,25 @@ static void __init setup_processor(void)
 	if (block && !(block & 0x8))
 		compat_elf_hwcap2 |= COMPAT_HWCAP2_CRC32;
 #endif
+}
+
+static void __init setup_processor(void)
+{
+	struct cpu_info *cpu_info;
+
+	cpu_info = lookup_processor_type(read_cpuid_id());
+	if (!cpu_info) {
+		printk("CPU configuration botched (ID %08x), unable to continue.\n",
+		       read_cpuid_id());
+		while (1);
+	}
+
+	cpu_name = cpu_info->cpu_name;
+
+	printk("CPU: %s [%08x] revision %d\n",
+	       cpu_name, read_cpuid_id(), read_cpuid_id() & 15);
+
+	sprintf(init_utsname()->machine, ELF_PLATFORM);
 }
 
 static void __init setup_machine_fdt(phys_addr_t dt_phys)
@@ -394,21 +432,7 @@ void __init setup_arch(char **cmdline_p)
 	init_mm.end_code   = (unsigned long) _etext;
 	init_mm.end_data   = (unsigned long) _edata;
 	init_mm.brk	   = (unsigned long) _end;
-#if 1   //ZTE_XJB_20130216 for power_off charging
-        //get the boot mode here.
-	if (strstr(boot_command_line, "androidboot.mode=charger"))
-	{
-		offcharging_flag = 1;
-		printk("ZTE :boot mode is offcharging/charger \n"); //ZTE
-	}
-#endif
 
-       /*get emmc_hynix_version from cmdline if it is Hynix and V5.0*/
-       if (strstr(boot_command_line, "emmc.hynix.verison=7"))
-       {
-		emmc_version_5_0 = 1;
-		pr_err("ZTE :emmc hynix version is 5.0\n");
-       }
 	*cmdline_p = boot_command_line;
 
 	init_mem_pgprot();

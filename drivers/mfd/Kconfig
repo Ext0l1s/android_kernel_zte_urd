@@ -441,6 +441,20 @@ config MFD_PM8XXX_IRQ
 	  This is required to use certain other PM 8xxx features, such as GPIO
 	  and MPP.
 
+config MFD_I2C_PMIC
+	tristate "QTI I2C PMICs"
+	depends on OF
+	depends on I2C
+	select IRQ_DOMAIN
+	select REGMAP_I2C
+	help
+	  This enables support for controlling Qualcomm Technologies, Inc.
+	  PMICs over I2C. The driver controls interrupts, and provides register
+	  access for all of the device's peripherals.
+
+	  Say M here if you want to include support for the I2C PMIC series as
+	  a module. The module will be called "qcom-i2c-pmic".
+
 config MFD_RDC321X
 	tristate "RDC R-321x southbridge"
 	select MFD_CORE
@@ -1139,19 +1153,6 @@ config WCD9320_CODEC
 	  read/write capability to registers which are part of the
 	  WCD9320 core and gives the ability to use the WCD9320 codec.
 	  The WCD9320 codec support either I2C/I2S or Slimbus for
-	  control and data exchnage with master processor.
-
-config AK4961_CODEC
-	tristate "AK4961 Codec"
-	select SLIMBUS
-	select MFD_CORE
-	select SND_SOC_AK4961
-	default n
-	help
-	  Enables the AK49XX codec core driver. The core driver provides
-	  read/write capability to registers which are part of the
-	  AK4961 core and gives the ability to use the AK4961 codec.
-	  The AK4961 codec support either SPI/I2S or Slimbus for
 	  control and data exchnage with master processor.
 
 config WCD9306_CODEC

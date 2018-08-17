@@ -36,23 +36,13 @@
 #include "sdhci.h"
 #include "cmdq_hci.h"
 
-#include <linux/proc_fs.h>
 #define DRIVER_NAME "sdhci"
 #define SDHCI_SUSPEND_TIMEOUT 300 /* 300 ms */
 #define SDHCI_PM_QOS_DEFAULT_DELAY 5 /* 5 ms */
 #define SDHCI_MAX_PM_QOS_TIMEOUT   100 /* 100 ms */
 
-#ifdef CONFIG_MMC_DEBUG
 #define DBG(f, x...) \
 	pr_debug(DRIVER_NAME " [%s()]: " f, __func__,## x)
-#else
-#define DBG(fmt, args...)	\
-	do {								\
-	   if(mmc_debug)							\
-	      printk(KERN_ERR"%s: " fmt, __func__ , ## args) ;	\
-	}while(0)
-int mmc_debug = 0;
-#endif
 
 #if defined(CONFIG_LEDS_CLASS) || (defined(CONFIG_LEDS_CLASS_MODULE) && \
 	defined(CONFIG_MMC_SDHCI_MODULE))
@@ -1273,7 +1263,6 @@ static void sdhci_send_command(struct sdhci_host *host, struct mmc_command *cmd)
 		host->data_start_time = ktime_get();
 	trace_mmc_cmd_rw_start(cmd->opcode, cmd->arg, cmd->flags);
 	sdhci_writew(host, SDHCI_MAKE_CMD(cmd->opcode, flags), SDHCI_COMMAND);
-	DBG("%s:op %02x arg %08x flags %08x\n",mmc_hostname(host->mmc),cmd->opcode, cmd->arg, cmd->flags);
 }
 
 static void sdhci_finish_command(struct sdhci_host *host)
@@ -1699,6 +1688,20 @@ static int sdhci_disable(struct mmc_host *mmc)
 		host->ops->platform_bus_voting(host, 0);
 
 	return 0;
+}
+
+static void sdhci_notify_halt(struct mmc_host *mmc, bool halt)
+{
+	struct sdhci_host *host = mmc_priv(mmc);
+
+	pr_debug("%s: halt notification was sent, halt=%d\n",
+		mmc_hostname(mmc), halt);
+	if (host->flags & SDHCI_USE_ADMA_64BIT) {
+		if (halt)
+			host->adma_desc_line_sz = 16;
+		else
+			host->adma_desc_line_sz = 12;
+	}
 }
 
 static inline void sdhci_update_power_policy(struct sdhci_host *host,
@@ -2153,7 +2156,6 @@ static void sdhci_do_set_ios(struct sdhci_host *host, struct mmc_ios *ios)
 
 	ctrl = sdhci_readb(host, SDHCI_HOST_CONTROL);
 
-	DBG("%s:ios->clock=%u,ios->timing=%d\n",mmc_hostname(host->mmc),ios->clock,ios->timing);
 	if ((ios->timing == MMC_TIMING_SD_HS ||
 	     ios->timing == MMC_TIMING_MMC_HS)
 	    && !(host->quirks & SDHCI_QUIRK_NO_HISPD_BIT))
@@ -2914,6 +2916,7 @@ static const struct mmc_host_ops sdhci_ops = {
 	.stop_request = sdhci_stop_request,
 	.get_xfer_remain = sdhci_get_xfer_remain,
 	.notify_load	= sdhci_notify_load,
+	.notify_halt	= sdhci_notify_halt,
 	.notify_pm_status	= sdhci_notify_pm_status,
 };
 
@@ -3149,12 +3152,12 @@ static void sdhci_show_adma_error(struct sdhci_host *host)
 
 		if (host->flags & SDHCI_USE_ADMA_64BIT) {
 			__le64 *dma = (__le64 *)(desc + 4);
-			pr_info("%s: %p: DMA %llx, LEN 0x%04x, Attr=0x%02x\n",
+			pr_info("%s: %pK: DMA %llx, LEN 0x%04x, Attr=0x%02x\n",
 			    name, desc, (long long)le64_to_cpu(*dma),
 			    le16_to_cpu(*len), attr);
 		} else {
 			__le32 *dma = (__le32 *)(desc + 4);
-			pr_info("%s: %p: DMA 0x%08x, LEN 0x%04x, Attr=0x%02x\n",
+			pr_info("%s: %pK: DMA 0x%08x, LEN 0x%04x, Attr=0x%02x\n",
 			    name, desc, le32_to_cpu(*dma), le16_to_cpu(*len),
 			    attr);
 		}
@@ -3779,8 +3782,6 @@ static void sdhci_cmdq_set_transfer_params(struct mmc_host *mmc)
 			ctrl |= SDHCI_CTRL_ADMA32;
 		sdhci_writeb(host, ctrl, SDHCI_HOST_CONTROL);
 	}
-	if (host->ops->toggle_cdr)
-		host->ops->toggle_cdr(host, false);
 }
 
 static void sdhci_cmdq_clear_set_irqs(struct mmc_host *mmc, bool clear)
@@ -4672,67 +4673,6 @@ void sdhci_free_host(struct sdhci_host *host)
 
 EXPORT_SYMBOL_GPL(sdhci_free_host);
 
-#ifndef CONFIG_MMC_DEBUG
-static int sdhci_proc_show(struct seq_file *file, void *v)
-{
-      pr_err("%s,e\n",__func__);
-
-      if(mmc_debug)
-          seq_puts(file, "on\n");
-      else
-          seq_puts(file, "off\n");
-
-      return 0;
-}
-static int sdhci_proc_open(struct inode *inode, struct file *file)
-{
-      return single_open(file, sdhci_proc_show, NULL);
-}
-
-static ssize_t sdhci_write(struct file *file, const char __user *buf,
-			      size_t count, loff_t *off)
-{
-	char kbuf[4]; /* "on" or "off". */
-	int read_len;
-
-	read_len = count < 3 ? count : 3;
-	if (copy_from_user(kbuf, buf, read_len))
-		return -EINVAL;
-
-	kbuf[read_len] = '\0';
-
-	if (!strncmp(kbuf, "on", 2)){
-		pr_err("%s,on\n",__func__);
-		mmc_debug = 1;
-	}
-	else if (!strncmp(kbuf, "off", 3)){
-		pr_err("%s,on\n",__func__);
-		mmc_debug = 0;
-	}
-	else{
-		pr_err("%s,else return EINVAL\n",__func__);
-
-		return -EINVAL;
-	}
-
-	return count;
-}
-
-static const struct file_operations sdhci_proc_fops = {
-	.open		= sdhci_proc_open,
-	.read		= seq_read,
-	.write		= sdhci_write,
-	.release	= single_release,
-};
-
-static void
-init_mmc_proc(void)
-{
-	proc_create("sdhci_log", 0644, NULL, &sdhci_proc_fops);
-}
-#endif
-
-//end
 /*****************************************************************************\
  *                                                                           *
  * Driver init/exit                                                          *
@@ -4745,11 +4685,6 @@ static int __init sdhci_drv_init(void)
 		": Secure Digital Host Controller Interface driver\n");
 	pr_info(DRIVER_NAME ": Copyright(c) Pierre Ossman\n");
 
-	// proc interface
-	#ifndef CONFIG_MMC_DEBUG
-	  init_mmc_proc();
-	#endif
-	//end
 	return 0;
 }
 

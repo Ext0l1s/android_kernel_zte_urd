@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -210,6 +210,7 @@ struct dentry *panel_debugfs_create_array(const char *name, umode_t mode,
 	    (size != sizeof(u16)) &&
 	    (size != sizeof(u32))) {
 		pr_warn("Value size %zu bytes is not supported\n", size);
+		kfree(data);
 		return NULL;
 	}
 
@@ -434,6 +435,7 @@ int mdss_panel_debugfs_setup(struct mdss_panel_info *panel_info, struct dentry
 		return -ENOMEM;
 	}
 
+	debugfs_info->parent = parent;
 	debugfs_info->root = debugfs_create_dir(intf_str, parent);
 	if (IS_ERR_OR_NULL(debugfs_info->root)) {
 		pr_err("Debugfs create dir failed with error: %ld\n",
@@ -483,6 +485,7 @@ int mdss_panel_debugfs_init(struct mdss_panel_info *panel_info,
 				intf_str);
 		if (rc) {
 			pr_err("error in initilizing panel debugfs\n");
+			mdss_panel_debugfs_cleanup(&pdata->panel_info);
 			return rc;
 		}
 		pdata = pdata->next;
@@ -496,13 +499,16 @@ void mdss_panel_debugfs_cleanup(struct mdss_panel_info *panel_info)
 {
 	struct mdss_panel_data *pdata;
 	struct mdss_panel_debugfs_info *debugfs_info;
+	struct dentry *parent = NULL;
 	pdata = container_of(panel_info, struct mdss_panel_data, panel_info);
 	do {
 		debugfs_info = pdata->panel_info.debugfs_info;
-		if (debugfs_info && debugfs_info->root)
-			debugfs_remove_recursive(debugfs_info->root);
+		if (debugfs_info && !parent)
+			parent = debugfs_info->parent;
+		kfree(debugfs_info);
 		pdata = pdata->next;
 	} while (pdata);
+	debugfs_remove_recursive(parent);
 	pr_debug("Cleaned up mdss_panel_debugfs_info\n");
 }
 
@@ -554,4 +560,53 @@ void mdss_panel_debugfsinfo_to_panelinfo(struct mdss_panel_info *panel_info)
 		pinfo->panel_max_vtotal = mdss_panel_get_vtotal(pinfo);
 		pdata = pdata->next;
 	} while (pdata);
+}
+
+struct mdss_panel_timing *mdss_panel_get_timing_by_name(
+		struct mdss_panel_data *pdata,
+		const char *name)
+{
+	struct mdss_panel_timing *pt;
+
+	if (pdata && name) {
+		list_for_each_entry(pt, &pdata->timings_list, list)
+			if (pt->name && !strcmp(pt->name, name))
+				return pt;
+	}
+
+	return NULL;
+}
+
+void mdss_panel_info_from_timing(struct mdss_panel_timing *pt,
+		struct mdss_panel_info *pinfo)
+{
+	if (!pt || !pinfo)
+		return;
+
+	pinfo->clk_rate = pt->clk_rate;
+	pinfo->xres = pt->xres;
+	pinfo->lcdc.h_front_porch = pt->h_front_porch;
+	pinfo->lcdc.h_back_porch = pt->h_back_porch;
+	pinfo->lcdc.h_pulse_width = pt->h_pulse_width;
+
+	pinfo->yres = pt->yres;
+	pinfo->lcdc.v_front_porch = pt->v_front_porch;
+	pinfo->lcdc.v_back_porch = pt->v_back_porch;
+	pinfo->lcdc.v_pulse_width = pt->v_pulse_width;
+
+	pinfo->lcdc.border_bottom = pt->border_bottom;
+	pinfo->lcdc.border_top = pt->border_top;
+	pinfo->lcdc.border_left = pt->border_left;
+	pinfo->lcdc.border_right = pt->border_right;
+	pinfo->lcdc.xres_pad = pt->border_left + pt->border_right;
+	pinfo->lcdc.yres_pad = pt->border_top + pt->border_bottom;
+
+	pinfo->mipi.frame_rate = pt->frame_rate;
+	pinfo->edp.frame_rate = pinfo->mipi.frame_rate;
+
+	pinfo->dsc = pt->dsc;
+	pinfo->fbc = pt->fbc;
+	pinfo->compression_mode = pt->compression_mode;
+
+	pinfo->te = pt->te;
 }

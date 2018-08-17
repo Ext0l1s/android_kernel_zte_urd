@@ -1,8 +1,8 @@
 /*
- * drivers/gpu/ion/ion_priv.h
+ * drivers/staging/android/ion/ion_priv.h
  *
  * Copyright (C) 2011 Google, Inc.
- * Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2017, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -355,8 +355,16 @@ void ion_carveout_heap_destroy(struct ion_heap *);
 
 struct ion_heap *ion_chunk_heap_create(struct ion_platform_heap *);
 void ion_chunk_heap_destroy(struct ion_heap *);
+#ifdef CONFIG_CMA
 struct ion_heap *ion_cma_heap_create(struct ion_platform_heap *);
 void ion_cma_heap_destroy(struct ion_heap *);
+#else
+static inline struct ion_heap *ion_cma_heap_create(struct ion_platform_heap *h)
+{
+	return NULL;
+}
+static inline void ion_cma_heap_destroy(struct ion_heap *h) {}
+#endif
 
 /**
  * kernel api to allocate/free from carveout -- used when carveout is
@@ -433,7 +441,8 @@ int ion_page_pool_shrink(struct ion_page_pool *pool, gfp_t gfp_mask,
 void ion_pages_sync_for_device(struct device *dev, struct page *page,
 		size_t size, enum dma_data_direction dir);
 
-int ion_walk_heaps(struct ion_client *client, int heap_id, void *data,
+int ion_walk_heaps(struct ion_client *client, int heap_id,
+			enum ion_heap_type type, void *data,
 			int (*f)(struct ion_heap *heap, void *data));
 
 struct ion_handle *ion_handle_get_by_id(struct ion_client *client,

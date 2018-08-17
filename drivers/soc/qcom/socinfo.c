@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2015, 2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -44,6 +44,7 @@
 #define SMEM_IMAGE_VERSION_OEM_OFFSET 96
 #define SMEM_IMAGE_VERSION_PARTITION_APPS 10
 
+static DECLARE_RWSEM(current_image_rwsem);
 enum {
 	HW_PLATFORM_UNKNOWN = 0,
 	HW_PLATFORM_SURF    = 1,
@@ -509,11 +510,11 @@ static struct msm_soc_info cpu_of_id[] = {
 	[289] = {MSM_CPU_8952, "APQ8052"},
 
 	/* 8976 ID */
-	[278] = {MSM_CPU_8976, "MSM8976"},
-	[277] = {MSM_CPU_8976, "APQ8076"},
+	[278] = {MSM_CPU_8976, "MSM8976", "SG"},
+	[277] = {MSM_CPU_8976, "APQ8076", "SG"},
 	/* 8956 ID */
-	[266] = {MSM_CPU_8956, "MSM8956"},
-	[274] = {MSM_CPU_8956, "APQ8056"},
+	[266] = {MSM_CPU_8956, "MSM8956", "SG"},
+	[274] = {MSM_CPU_8956, "APQ8056", "SG"},
 
 	/* 8929 IDs */
 	[268] = {MSM_CPU_8929, "MSM8929"},
@@ -542,58 +543,6 @@ static struct socinfo_v1 dummy_socinfo = {
 	.format = 1,
 	.version = 1,
 };
-
-#ifdef CONFIG_ZTE_BOOT_MODE
-static int g_boot_mode = 0;
-
-void socinfo_set_boot_mode(int boot_mode)
-{
-        g_boot_mode = boot_mode;
-}
-
-int socinfo_get_ftm_flag(void)
-{
-    return g_boot_mode == ENUM_BOOT_MODE_FTM ? 1 : 0;
-}
-EXPORT_SYMBOL(socinfo_get_ftm_flag);
-
-int socinfo_get_recovery_flag(void)
-{
-    return g_boot_mode == ENUM_BOOT_MODE_RECOVERY ? 1 : 0;
-}
-EXPORT_SYMBOL(socinfo_get_recovery_flag);
-
-int socinfo_get_ffbm_flag(void)
-{
-    return g_boot_mode == ENUM_BOOT_MODE_FFBM ? 1 : 0;
-}
-EXPORT_SYMBOL(socinfo_get_ffbm_flag);
-
-///ZTE_PM lhx add code for pv version
-static int pv_flag = 0;
-
-void socinfo_set_pv_flag(int val)
-{
-	pv_flag = val;
-}
-
-int socinfo_get_pv_flag(void)
-{
-    return pv_flag;
-}
-
-//zte_pm_20151126 add  for pv version // boot add
-static int fingprint_hw_type = -1;
-void socinfo_set_fp_hw(int val)
-{
-    fingprint_hw_type = val;
-}
-
-int socinfo_get_fp_hw(void)
-{
-    return fingprint_hw_type;
-}
-#endif
 
 uint32_t socinfo_get_id(void)
 {
@@ -629,6 +578,13 @@ static char *msm_read_hardware_id(void)
 	if (ret > sizeof(msm_soc_str))
 		goto err_path;
 
+	/* Add suffix if need to be */
+	if ((socinfo->v2.raw_version == 2) && strlen(cpu_of_id[socinfo->v1.id].suffix)) {
+		ret = strlcat(msm_soc_str, cpu_of_id[socinfo->v1.id].suffix,
+			sizeof(msm_soc_str));
+		if (ret > sizeof(msm_soc_str))
+			goto err_path;
+	}
 	string_generated = true;
 	return msm_soc_str;
 err_path:
@@ -856,7 +812,9 @@ msm_get_image_version(struct device *dev,
 				__func__);
 		return snprintf(buf, SMEM_IMAGE_VERSION_NAME_SIZE, "Unknown");
 	}
+	down_read(&current_image_rwsem);
 	string_address += current_image * SMEM_IMAGE_VERSION_SINGLE_BLOCK_SIZE;
+	up_read(&current_image_rwsem);
 	return snprintf(buf, SMEM_IMAGE_VERSION_NAME_SIZE, "%-.75s\n",
 			string_address);
 }
@@ -869,15 +827,20 @@ msm_set_image_version(struct device *dev,
 {
 	char *store_address;
 
-	if (current_image != SMEM_IMAGE_VERSION_PARTITION_APPS)
+	down_read(&current_image_rwsem);
+	if (current_image != SMEM_IMAGE_VERSION_PARTITION_APPS) {
+		up_read(&current_image_rwsem);
 		return count;
+	}
 	store_address = socinfo_get_image_version_base_address();
 	if (IS_ERR_OR_NULL(store_address)) {
 		pr_err("%s : Failed to get image version base address",
 				__func__);
+		up_read(&current_image_rwsem);
 		return count;
 	}
 	store_address += current_image * SMEM_IMAGE_VERSION_SINGLE_BLOCK_SIZE;
+	up_read(&current_image_rwsem);
 	snprintf(store_address, SMEM_IMAGE_VERSION_NAME_SIZE, "%-.75s", buf);
 	return count;
 }
@@ -896,7 +859,9 @@ msm_get_image_variant(struct device *dev,
 		return snprintf(buf, SMEM_IMAGE_VERSION_VARIANT_SIZE,
 		"Unknown");
 	}
+	down_read(&current_image_rwsem);
 	string_address += current_image * SMEM_IMAGE_VERSION_SINGLE_BLOCK_SIZE;
+	up_read(&current_image_rwsem);
 	string_address += SMEM_IMAGE_VERSION_VARIANT_OFFSET;
 	return snprintf(buf, SMEM_IMAGE_VERSION_VARIANT_SIZE, "%-.20s\n",
 			string_address);
@@ -910,15 +875,20 @@ msm_set_image_variant(struct device *dev,
 {
 	char *store_address;
 
-	if (current_image != SMEM_IMAGE_VERSION_PARTITION_APPS)
+	down_read(&current_image_rwsem);
+	if (current_image != SMEM_IMAGE_VERSION_PARTITION_APPS) {
+		up_read(&current_image_rwsem);
 		return count;
+	}
 	store_address = socinfo_get_image_version_base_address();
 	if (IS_ERR_OR_NULL(store_address)) {
 		pr_err("%s : Failed to get image version base address",
 				__func__);
+		up_read(&current_image_rwsem);
 		return count;
 	}
 	store_address += current_image * SMEM_IMAGE_VERSION_SINGLE_BLOCK_SIZE;
+	up_read(&current_image_rwsem);
 	store_address += SMEM_IMAGE_VERSION_VARIANT_OFFSET;
 	snprintf(store_address, SMEM_IMAGE_VERSION_VARIANT_SIZE, "%-.20s", buf);
 	return count;
@@ -937,7 +907,9 @@ msm_get_image_crm_version(struct device *dev,
 				__func__);
 		return snprintf(buf, SMEM_IMAGE_VERSION_OEM_SIZE, "Unknown");
 	}
+	down_read(&current_image_rwsem);
 	string_address += current_image * SMEM_IMAGE_VERSION_SINGLE_BLOCK_SIZE;
+	up_read(&current_image_rwsem);
 	string_address += SMEM_IMAGE_VERSION_OEM_OFFSET;
 	return snprintf(buf, SMEM_IMAGE_VERSION_OEM_SIZE, "%-.32s\n",
 			string_address);
@@ -951,15 +923,20 @@ msm_set_image_crm_version(struct device *dev,
 {
 	char *store_address;
 
-	if (current_image != SMEM_IMAGE_VERSION_PARTITION_APPS)
+	down_read(&current_image_rwsem);
+	if (current_image != SMEM_IMAGE_VERSION_PARTITION_APPS) {
+		up_read(&current_image_rwsem);
 		return count;
+	}
 	store_address = socinfo_get_image_version_base_address();
 	if (IS_ERR_OR_NULL(store_address)) {
 		pr_err("%s : Failed to get image version base address",
 				__func__);
+		up_read(&current_image_rwsem);
 		return count;
 	}
 	store_address += current_image * SMEM_IMAGE_VERSION_SINGLE_BLOCK_SIZE;
+	up_read(&current_image_rwsem);
 	store_address += SMEM_IMAGE_VERSION_OEM_OFFSET;
 	snprintf(store_address, SMEM_IMAGE_VERSION_OEM_SIZE, "%-.32s", buf);
 	return count;
@@ -970,8 +947,14 @@ msm_get_image_number(struct device *dev,
 			struct device_attribute *attr,
 			char *buf)
 {
-	return snprintf(buf, PAGE_SIZE, "%d\n",
+	int ret;
+
+	down_read(&current_image_rwsem);
+	ret = snprintf(buf, PAGE_SIZE, "%d\n",
 			current_image);
+	up_read(&current_image_rwsem);
+	return ret;
+
 }
 
 static ssize_t
@@ -983,10 +966,12 @@ msm_select_image(struct device *dev, struct device_attribute *attr,
 	ret = kstrtoint(buf, 10, &digit);
 	if (ret)
 		return ret;
+	down_write(&current_image_rwsem);
 	if (0 <= digit && digit < SMEM_IMAGE_VERSION_BLOCKS_COUNT)
 		current_image = digit;
 	else
 		current_image = 0;
+	up_write(&current_image_rwsem);
 	return count;
 }
 
@@ -1053,64 +1038,6 @@ static struct device_attribute image_crm_version =
 static struct device_attribute select_image =
 	__ATTR(select_image, S_IRUGO | S_IWUSR,
 			msm_get_image_number, msm_select_image);
-
-#ifdef CONFIG_ZTE_BOOT_MODE
-static char *socinfo_zte_hw_ver = NULL;
-
-void socinfo_set_hw_ver(char *ver)
-{
-	socinfo_zte_hw_ver = ver;
-}
-
-static ssize_t socinfo_show_zte_hw_ver(struct device *dev,
-				       struct device_attribute *attr,
-				       char *buf)
-{
-	if (!socinfo_zte_hw_ver)
-		return snprintf(buf, PAGE_SIZE, "%s\n", "INVALID Hardware version");
-
-	return snprintf(buf, PAGE_SIZE, "%s\n", socinfo_zte_hw_ver);
-}
-
-/*
- * Defined for op in
- * '/sys/devices/soc0/zte_hw_ver'
- */
-static struct device_attribute zte_hw_ver =
-	__ATTR(zte_hw_ver, S_IRUGO, socinfo_show_zte_hw_ver, NULL);
-#endif
-
-#if defined(CONFIG_BOARD_JASMINE) || defined(CONFIG_BOARD_GEVJON)
-/*
- * Support for marking sw version PV or Normal by ZTE_BOOT
- */
-static const char *socinfo_zte_sw_ver = NULL;
-
-static ssize_t socinfo_show_zte_sw_ver(struct device *dev,
-                                       struct device_attribute *attr,
-                                       char *buf)
-{
-    return snprintf(buf, PAGE_SIZE, "%s\n", socinfo_zte_sw_ver);
-}
-
-/*
- * Defined for op in '/sys/devices/soc0/zte_sw_ver'
- */
-static struct device_attribute zte_sw_ver = 
-    __ATTR(zte_sw_ver, S_IRUGO, socinfo_show_zte_sw_ver, NULL);
-
-void socinfo_sync_sysfs_zte_sw_ver(const char *sw_ver)
-{
-    if ((sw_ver == NULL) || (PAGE_SIZE < (strlen(sw_ver) + 1))) {
-        pr_err("%s: invalid length\n", __func__);
-        socinfo_zte_sw_ver = "INVALID";
-        return;
-    }
-
-    socinfo_zte_sw_ver = sw_ver;
-}
-EXPORT_SYMBOL(socinfo_sync_sysfs_zte_sw_ver);
-#endif
 
 static void * __init setup_dummy_socinfo(void)
 {
@@ -1194,12 +1121,6 @@ static void __init populate_soc_sysfs_files(struct device *msm_soc_device)
 	device_create_file(msm_soc_device, &image_variant);
 	device_create_file(msm_soc_device, &image_crm_version);
 	device_create_file(msm_soc_device, &select_image);
-#ifdef CONFIG_ZTE_BOOT_MODE
-	device_create_file(msm_soc_device, &zte_hw_ver);
-#endif
-#if defined(CONFIG_BOARD_JASMINE) || defined(CONFIG_BOARD_GEVJON)
-	device_create_file(msm_soc_device, &zte_sw_ver);
-#endif
 
 	switch (legacy_format) {
 	case 10:

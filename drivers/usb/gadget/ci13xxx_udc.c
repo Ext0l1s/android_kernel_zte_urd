@@ -66,9 +66,6 @@
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
 #include <linux/usb/otg.h>
-/* begin for scsi by zte */
-#include <linux/switch.h>
-/* begin for scsi by zte */
 #include <linux/usb/msm_hsusb.h>
 #include <linux/tracepoint.h>
 #include <linux/qcom/usb_trace.h>
@@ -108,9 +105,8 @@ ctrl_endpt_in_desc = {
 	.wMaxPacketSize  = cpu_to_le16(CTRL_PAYLOAD_MAX),
 };
 
-/* begin UDC descriptor  for scsi by zte */
+/* UDC descriptor */
 static struct ci13xxx *_udc;
-/* end UDC descriptor  for scsi by zte */
 
 /* Interrupt statistics */
 #define ISR_MASK   0x1F
@@ -916,7 +912,7 @@ static ssize_t show_device(struct device *dev, struct device_attribute *attr,
 	struct usb_gadget *gadget = &udc->gadget;
 	int n = 0;
 
-	dbg_trace("[%s] %p\n", __func__, buf);
+	dbg_trace("[%s] %pK\n", __func__, buf);
 	if (attr == NULL || buf == NULL) {
 		dev_err(dev, "[%s] EINVAL\n", __func__);
 		return 0;
@@ -958,7 +954,7 @@ static ssize_t show_driver(struct device *dev, struct device_attribute *attr,
 	struct usb_gadget_driver *driver = udc->driver;
 	int n = 0;
 
-	dbg_trace("[%s] %p\n", __func__, buf);
+	dbg_trace("[%s] %pK\n", __func__, buf);
 	if (attr == NULL || buf == NULL) {
 		dev_err(dev, "[%s] EINVAL\n", __func__);
 		return 0;
@@ -1173,7 +1169,7 @@ static void dbg_usb_op_fail(u8 addr, const char *name,
 		list_for_each(ptr, &mep->qh.queue) {
 			req = list_entry(ptr, struct ci13xxx_req, queue);
 			scnprintf(msg, sizeof(msg),
-					"%pa:%08X:%08X\n",
+					"%pKa:%08X:%08X\n",
 					&req->dma, req->ptr->next,
 					req->ptr->token);
 			dbg_print(addr, "REQ", 0, msg);
@@ -1196,7 +1192,7 @@ static ssize_t show_events(struct device *dev, struct device_attribute *attr,
 	unsigned long flags;
 	unsigned i, j, n = 0;
 
-	dbg_trace("[%s] %p\n", __func__, buf);
+	dbg_trace("[%s] %pK\n", __func__, buf);
 	if (attr == NULL || buf == NULL) {
 		dev_err(dev, "[%s] EINVAL\n", __func__);
 		return 0;
@@ -1231,7 +1227,7 @@ static ssize_t store_events(struct device *dev, struct device_attribute *attr,
 {
 	unsigned tty;
 
-	dbg_trace("[%s] %p, %d\n", __func__, buf, count);
+	dbg_trace("[%s] %pK, %d\n", __func__, buf, count);
 	if (attr == NULL || buf == NULL) {
 		dev_err(dev, "[%s] EINVAL\n", __func__);
 		goto done;
@@ -1263,7 +1259,7 @@ static ssize_t show_inters(struct device *dev, struct device_attribute *attr,
 	u32 intr;
 	unsigned i, j, n = 0;
 
-	dbg_trace("[%s] %p\n", __func__, buf);
+	dbg_trace("[%s] %pK\n", __func__, buf);
 	if (attr == NULL || buf == NULL) {
 		dev_err(dev, "[%s] EINVAL\n", __func__);
 		return 0;
@@ -1336,7 +1332,7 @@ static ssize_t store_inters(struct device *dev, struct device_attribute *attr,
 	unsigned long flags;
 	unsigned en, bit;
 
-	dbg_trace("[%s] %p, %d\n", __func__, buf, count);
+	dbg_trace("[%s] %pK, %d\n", __func__, buf, count);
 	if (attr == NULL || buf == NULL) {
 		dev_err(dev, "[%s] EINVAL\n", __func__);
 		goto done;
@@ -1376,7 +1372,7 @@ static ssize_t show_port_test(struct device *dev,
 	unsigned long flags;
 	unsigned mode;
 
-	dbg_trace("[%s] %p\n", __func__, buf);
+	dbg_trace("[%s] %pK\n", __func__, buf);
 	if (attr == NULL || buf == NULL) {
 		dev_err(dev, "[%s] EINVAL\n", __func__);
 		return 0;
@@ -1402,7 +1398,7 @@ static ssize_t store_port_test(struct device *dev,
 	unsigned long flags;
 	unsigned mode;
 
-	dbg_trace("[%s] %p, %d\n", __func__, buf, count);
+	dbg_trace("[%s] %pK, %d\n", __func__, buf, count);
 	if (attr == NULL || buf == NULL) {
 		dev_err(dev, "[%s] EINVAL\n", __func__);
 		goto done;
@@ -1436,7 +1432,7 @@ static ssize_t show_qheads(struct device *dev, struct device_attribute *attr,
 	unsigned long flags;
 	unsigned i, j, n = 0;
 
-	dbg_trace("[%s] %p\n", __func__, buf);
+	dbg_trace("[%s] %pK\n", __func__, buf);
 	if (attr == NULL || buf == NULL) {
 		dev_err(dev, "[%s] EINVAL\n", __func__);
 		return 0;
@@ -1476,7 +1472,7 @@ static ssize_t show_registers(struct device *dev,
 	u32 *dump;
 	unsigned i, k, n = 0;
 
-	dbg_trace("[%s] %p\n", __func__, buf);
+	dbg_trace("[%s] %pK\n", __func__, buf);
 	if (attr == NULL || buf == NULL) {
 		dev_err(dev, "[%s] EINVAL\n", __func__);
 		return 0;
@@ -1518,7 +1514,7 @@ static ssize_t store_registers(struct device *dev,
 	struct ci13xxx *udc = container_of(dev, struct ci13xxx, gadget.dev);
 	unsigned long addr, data, flags;
 
-	dbg_trace("[%s] %p, %d\n", __func__, buf, count);
+	dbg_trace("[%s] %pK, %d\n", __func__, buf, count);
 	if (attr == NULL || buf == NULL) {
 		dev_err(dev, "[%s] EINVAL\n", __func__);
 		goto done;
@@ -1554,7 +1550,7 @@ static ssize_t show_requests(struct device *dev, struct device_attribute *attr,
 	struct ci13xxx_req *req = NULL;
 	unsigned i, j, n = 0, qSize = sizeof(struct ci13xxx_td)/sizeof(u32);
 
-	dbg_trace("[%s] %p\n", __func__, buf);
+	dbg_trace("[%s] %pK\n", __func__, buf);
 	if (attr == NULL || buf == NULL) {
 		dev_err(dev, "[%s] EINVAL\n", __func__);
 		return 0;
@@ -1665,7 +1661,7 @@ static ssize_t print_dtds(struct device *dev,
 	list_for_each(ptr, &mEp->qh.queue) {
 		req = list_entry(ptr, struct ci13xxx_req, queue);
 
-		pr_info("\treq:%pa next:%08x token:%08x page0:%08x status:%d\n",
+		pr_info("\treq:%pKa next:%08x token:%08x page0:%08x status:%d\n",
 				&req->dma, req->ptr->next, req->ptr->token,
 				req->ptr->page[0], req->req.status);
 	}
@@ -1969,7 +1965,7 @@ static void ep_prime_timer_func(unsigned long data)
 				mep->qh.ptr->td.next, mep->qh.ptr->td.token);
 		list_for_each(ptr, &mep->qh.queue) {
 			req = list_entry(ptr, struct ci13xxx_req, queue);
-			pr_info("\treq:%pa:%08xtkn:%08xpage0:%08xsts:%d\n",
+			pr_info("\treq:%pKa:%08xtkn:%08xpage0:%08xsts:%d\n",
 					&req->dma, req->ptr->next,
 					req->ptr->token, req->ptr->page[0],
 					req->req.status);
@@ -2007,7 +2003,7 @@ static int _hardware_enqueue(struct ci13xxx_ep *mEp, struct ci13xxx_req *mReq)
 	unsigned length = mReq->req.length;
 	struct ci13xxx *udc = _udc;
 
-	trace("%p, %p", mEp, mReq);
+	trace("%pK, %pK", mEp, mReq);
 
 	/* don't queue twice */
 	if (mReq->req.status == -EALREADY)
@@ -2207,7 +2203,7 @@ done:
  */
 static int _hardware_dequeue(struct ci13xxx_ep *mEp, struct ci13xxx_req *mReq)
 {
-	trace("%p, %p", mEp, mReq);
+	trace("%pK, %pK", mEp, mReq);
 
 	if (mReq->req.status != -EALREADY)
 		return -EINVAL;
@@ -2409,7 +2405,7 @@ static int _ep_nuke(struct ci13xxx_ep *mEp)
 __releases(mEp->lock)
 __acquires(mEp->lock)
 {
-	trace("%p", mEp);
+	trace("%pK", mEp);
 
 	if (mEp == NULL)
 		return -EINVAL;
@@ -2456,7 +2452,7 @@ static int _gadget_stop_activity(struct usb_gadget *gadget)
 	struct ci13xxx    *udc = container_of(gadget, struct ci13xxx, gadget);
 	unsigned long flags;
 
-	trace("%p", gadget);
+	trace("%pK", gadget);
 
 	if (gadget == NULL)
 		return -EINVAL;
@@ -2505,7 +2501,7 @@ __acquires(udc->lock)
 {
 	int retval;
 
-	trace("%p", udc);
+	trace("%pK", udc);
 
 	if (udc == NULL) {
 		err("EINVAL");
@@ -2604,7 +2600,7 @@ static void isr_suspend_handler(struct ci13xxx *udc)
  */
 static void isr_get_status_complete(struct usb_ep *ep, struct usb_request *req)
 {
-	trace("%p, %p", ep, req);
+	trace("%pK, %pK", ep, req);
 
 	if (ep == NULL || req == NULL) {
 		err("EINVAL");
@@ -2631,7 +2627,7 @@ __acquires(mEp->lock)
 	struct usb_request *req = udc->status;
 	int dir, num, retval;
 
-	trace("%p, %p", mEp, setup);
+	trace("%pK, %pK", mEp, setup);
 
 	if (mEp == NULL || setup == NULL)
 		return -EINVAL;
@@ -2680,7 +2676,7 @@ isr_setup_status_complete(struct usb_ep *ep, struct usb_request *req)
 	struct ci13xxx *udc = req->context;
 	unsigned long flags;
 
-	trace("%p, %p", ep, req);
+	trace("%pK, %pK", ep, req);
 
 	spin_lock_irqsave(udc->lock, flags);
 	if (udc->test_mode)
@@ -2701,7 +2697,7 @@ __acquires(mEp->lock)
 	int retval;
 	struct ci13xxx_ep *mEp;
 
-	trace("%p", udc);
+	trace("%pK", udc);
 
 	mEp = (udc->ep0_dir == TX) ? &udc->ep0out : &udc->ep0in;
 	udc->status->context = udc;
@@ -2732,7 +2728,7 @@ __acquires(mEp->lock)
 	int req_dequeue = 1;
 	struct ci13xxx *udc = _udc;
 
-	trace("%p", mEp);
+	trace("%pK", mEp);
 
 	if (list_empty(&mEp->qh.queue))
 		return 0;
@@ -2830,7 +2826,7 @@ __acquires(udc->lock)
 	unsigned i;
 	u8 tmode = 0;
 
-	trace("%p", udc);
+	trace("%pK", udc);
 
 	if (udc == NULL) {
 		err("EINVAL");
@@ -3116,7 +3112,7 @@ static int ep_enable(struct usb_ep *ep,
 	unsigned long flags;
 	unsigned mult = 0;
 
-	trace("ep = %p, desc = %p", ep, desc);
+	trace("ep = %pK, desc = %pK", ep, desc);
 
 	if (ep == NULL || desc == NULL)
 		return -EINVAL;
@@ -3179,7 +3175,7 @@ static int ep_disable(struct usb_ep *ep)
 	int direction, retval = 0;
 	unsigned long flags;
 
-	trace("%p", ep);
+	trace("%pK", ep);
 
 	if (ep == NULL)
 		return -EINVAL;
@@ -3226,7 +3222,7 @@ static struct usb_request *ep_alloc_request(struct usb_ep *ep, gfp_t gfp_flags)
 	struct ci13xxx_ep  *mEp  = container_of(ep, struct ci13xxx_ep, ep);
 	struct ci13xxx_req *mReq = NULL;
 
-	trace("%p, %i", ep, gfp_flags);
+	trace("%pK, %i", ep, gfp_flags);
 
 	if (ep == NULL) {
 		err("EINVAL");
@@ -3262,7 +3258,7 @@ static void ep_free_request(struct usb_ep *ep, struct usb_request *req)
 	struct ci13xxx_req *mReq = container_of(req, struct ci13xxx_req, req);
 	unsigned long flags;
 
-	trace("%p, %p", ep, req);
+	trace("%pK, %pK", ep, req);
 
 	if (ep == NULL || req == NULL) {
 		err("EINVAL");
@@ -3297,7 +3293,7 @@ static int ep_queue(struct usb_ep *ep, struct usb_request *req,
 	unsigned long flags;
 	struct ci13xxx *udc = _udc;
 
-	trace("%p, %p, %X", ep, req, gfp_flags);
+	trace("%pK, %pK, %X", ep, req, gfp_flags);
 
 	spin_lock_irqsave(mEp->lock, flags);
 	if (ep == NULL || req == NULL || mEp->desc == NULL) {
@@ -3430,7 +3426,7 @@ static int ep_dequeue(struct usb_ep *ep, struct usb_request *req)
 	struct ci13xxx *udc = _udc;
 	unsigned long flags;
 
-	trace("%p, %p", ep, req);
+	trace("%pK, %pK", ep, req);
 
 	if (udc->udc_driver->in_lpm && udc->udc_driver->in_lpm(udc)) {
 		dev_err(udc->transceiver->dev,
@@ -3507,7 +3503,7 @@ static int ep_set_halt(struct usb_ep *ep, int value)
 	int direction, retval = 0;
 	unsigned long flags;
 
-	trace("%p, %i", ep, value);
+	trace("%pK, %i", ep, value);
 
 	if (ep == NULL || mEp->desc == NULL)
 		return -EINVAL;
@@ -3552,7 +3548,7 @@ static int ep_set_wedge(struct usb_ep *ep)
 	struct ci13xxx_ep *mEp = container_of(ep, struct ci13xxx_ep, ep);
 	unsigned long flags;
 
-	trace("%p", ep);
+	trace("%pK", ep);
 
 	if (ep == NULL || mEp->desc == NULL)
 		return -EINVAL;
@@ -3577,7 +3573,7 @@ static void ep_fifo_flush(struct usb_ep *ep)
 	struct ci13xxx_ep *mEp = container_of(ep, struct ci13xxx_ep, ep);
 	unsigned long flags;
 
-	trace("%p", ep);
+	trace("%pK", ep);
 
 	if (ep == NULL) {
 		err("%02X: -EINVAL", _usb_addr(mEp));
@@ -3614,75 +3610,6 @@ static const struct usb_ep_ops usb_ep_ops = {
 	.fifo_flush    = ep_fifo_flush,
 };
 
-/*begin notify open/close adbd uevent for scsi by zte*/
-static ssize_t udc_print_switch_name(struct switch_dev *sdev, char *buf)
-{
-	return sprintf(buf, "%s\n", "usb_scsi_command");
-}
-
-static ssize_t udc_print_switch_state(struct switch_dev *sdev, char *buf)
-{
-	return sprintf(buf, "%d\n", sdev->state);
-}
-
-static void udc_uevent(struct switch_dev *sdev, int state)
-{
-	//struct ci13xxx *udc = container_of(data, struct ci13xxx, event_work);
-	char *online[2] = { "USB_STATE=ONLINE", NULL };
-	char *offline[2] = { "USB_STATE=OFFLINE", NULL };
-	char **uevent_envp = NULL;
-
-	//switch_set_state(&sdev, state);
-
-	uevent_envp = state? online : offline;
-
-	if (uevent_envp) {
-		kobject_uevent_env(&sdev->dev->kobj, KOBJ_CHANGE, uevent_envp);
-		pr_info("%s: sent uevent %s\n", __func__, uevent_envp[0]);
-		}
-}
-int scsicmd_start_adbd(void)
-{
-        struct ci13xxx *udc = _udc;
-        if (NULL == udc) {
-                return -1;
-        }
-
-	udc->start_adbd = 1;
-        switch_set_state(&udc->scsi_sdev, 1);
-        printk(KERN_ERR"usb_xbl: %s, %d  %d\n",__FUNCTION__, __LINE__, udc->start_adbd);
-        return 0;
-}
-EXPORT_SYMBOL(scsicmd_start_adbd);
-
-int scsicmd_stop_adbd(void)
-{
-        struct ci13xxx *udc = _udc;
-        if (NULL == udc) {
-                return -1;
-        }
-        udc->start_adbd = 0;
-        switch_set_state(&udc->scsi_sdev, 0);
-        printk(KERN_ERR"usb_xbl: %s, %d  %d\n",__FUNCTION__, __LINE__, udc->start_adbd);
-        return 0;
-}
-
-static void scsicmd_usbstate_offline(struct work_struct *w)
-{
-        struct ci13xxx *udc = container_of(w, struct ci13xxx , scsi_work);
-        if (NULL == udc) {
-                return;
-        }
-
-        if (udc->start_adbd == 1) {
-                printk(KERN_ERR"usb_xbl: %s, %d  %d\n",__FUNCTION__, __LINE__, udc->start_adbd);
-                switch_set_state(&udc->scsi_sdev, 0);
-        }
-        udc->start_adbd = 0;
-        return;
-}
-/*end notify open/close adbd uevent for scsi by zte*/
-
 /******************************************************************************
  * GADGET block
  *****************************************************************************/
@@ -3701,29 +3628,30 @@ static int ci13xxx_vbus_session(struct usb_gadget *_gadget, int is_active)
 		gadget_ready = 1;
 	spin_unlock_irqrestore(udc->lock, flags);
 
-	if (gadget_ready) {
-		if (is_active) {
-			pm_runtime_get_sync(&_gadget->dev);
-			hw_device_reset(udc);
-			if (udc->udc_driver->notify_event)
-				udc->udc_driver->notify_event(udc,
-					CI13XXX_CONTROLLER_CONNECT_EVENT);
-			if (udc->softconnect)
-				hw_device_state(udc->ep0out.qh.dma);
-		} else {
-			hw_device_state(0);
-			_gadget_stop_activity(&udc->gadget);
-			if (udc->udc_driver->notify_event)
-				udc->udc_driver->notify_event(udc,
-					CI13XXX_CONTROLLER_DISCONNECT_EVENT);
-			pm_runtime_put_sync(&_gadget->dev);
-			/*begin for scsi by xbl_20121128 */
-			schedule_work(&udc->scsi_work);
-			/*end for scsi by xbl_20121128 */
+	if (!gadget_ready)
+		return 0;
+
+	if (is_active) {
+		pm_runtime_get_sync(&_gadget->dev);
+		hw_device_reset(udc);
+		if (udc->udc_driver->notify_event)
+			udc->udc_driver->notify_event(udc,
+				CI13XXX_CONTROLLER_CONNECT_EVENT);
+		/* Enable BAM (if needed) before starting controller */
+		if (udc->softconnect) {
+			dbg_event(0xFF, "BAM EN2",
+				_gadget->bam2bam_func_enabled);
+			msm_usb_bam_enable(CI_CTRL,
+				_gadget->bam2bam_func_enabled);
+			hw_device_state(udc->ep0out.qh.dma);
 		}
-		/*begin for scsi by xbl_20121128 */
-		udc_uevent(&udc->scsi_sdev, is_active);
-		/*end for scsi by xbl_20121128 */
+	} else {
+		hw_device_state(0);
+		_gadget_stop_activity(&udc->gadget);
+		if (udc->udc_driver->notify_event)
+			udc->udc_driver->notify_event(udc,
+				CI13XXX_CONTROLLER_DISCONNECT_EVENT);
+		pm_runtime_put_sync(&_gadget->dev);
 	}
 
 	return 0;
@@ -3775,6 +3703,12 @@ static int ci13xxx_pullup(struct usb_gadget *_gadget, int is_active)
 			"%s: Unable to exit lpm %d, ignore pullup\n",
 			__func__, ret);
 		return ret;
+	}
+
+	/* Enable BAM (if needed) before starting controller */
+	if (is_active) {
+		dbg_event(0xFF, "BAM EN1", _gadget->bam2bam_func_enabled);
+		msm_usb_bam_enable(CI_CTRL, _gadget->bam2bam_func_enabled);
 	}
 
 	spin_lock_irqsave(udc->lock, flags);
@@ -3829,7 +3763,7 @@ static int ci13xxx_start(struct usb_gadget *gadget,
 	int retval = -ENOMEM;
 	bool put = false;
 
-	trace("%p", driver);
+	trace("%pK", driver);
 
 	if (driver             == NULL ||
 	    driver->setup      == NULL ||
@@ -3922,7 +3856,7 @@ static int ci13xxx_stop(struct usb_gadget *gadget,
 	struct ci13xxx *udc = _udc;
 	unsigned long flags;
 
-	trace("%p", driver);
+	trace("%pK", driver);
 
 	if (driver             == NULL ||
 	    driver->unbind     == NULL ||
@@ -4053,7 +3987,7 @@ static int udc_probe(struct ci13xxx_udc_driver *driver, struct device *dev,
 	struct ci13xxx_platform_data *pdata;
 	int retval = 0, i, j;
 
-	trace("%p, %p, %p", dev, regs, driver->name);
+	trace("%pK, %pK, %pK", dev, regs, driver->name);
 
 	if (dev == NULL || regs == NULL || driver == NULL ||
 			driver->name == NULL)
@@ -4172,17 +4106,6 @@ static int udc_probe(struct ci13xxx_udc_driver *driver, struct device *dev,
 			goto put_transceiver;
 	}
 
-       /*begin for scsi by xbl-20121128*/
-	udc->scsi_sdev.name = "usb_scsi_command";
-	udc->scsi_sdev.print_name = udc_print_switch_name;
-	udc->scsi_sdev.print_state = udc_print_switch_state;
-	retval = switch_dev_register(&udc->scsi_sdev);
-        if (retval) {
-                goto put_transceiver;
-        }
-        INIT_WORK(&udc->scsi_work, scsicmd_usbstate_offline);
-       /*end for scsi by xbl-20121128*/
-
 	if (udc->transceiver) {
 		retval = otg_set_peripheral(udc->transceiver->otg,
 						&udc->gadget);
@@ -4221,9 +4144,6 @@ remove_trans:
 put_transceiver:
 	if (udc->transceiver)
 		usb_put_phy(udc->transceiver);
-	/* begin for scsi by zte */
-	switch_dev_unregister(&udc->scsi_sdev);
-	/* end for scsi by zte */
 destroy_eps:
 	destroy_eps(udc);
 free_dma_pools:

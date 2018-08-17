@@ -1109,8 +1109,7 @@ static int post_pkt_to_port(struct msm_ipc_port *port_ptr,
 	}
 
 	mutex_lock(&port_ptr->port_rx_q_lock_lhc3);
-	__pm_wakeup_event(port_ptr->port_rx_ws,5*60*MSEC_PER_SEC);//ZTE_PM_LHX_20160304 change ipc lock as 5min timeout wakelock. 
-	//__pm_stay_awake(port_ptr->port_rx_ws);
+	__pm_stay_awake(port_ptr->port_rx_ws);
 	list_add_tail(&temp_pkt->list, &port_ptr->port_rx_q);
 	wake_up(&port_ptr->port_rx_wait_q);
 	notify = port_ptr->notify;
@@ -2702,6 +2701,9 @@ int msm_ipc_router_register_server(struct msm_ipc_port *port_ptr,
 	struct msm_ipc_router_remote_port *rport_ptr;
 
 	if (!port_ptr || !name)
+		return -EINVAL;
+
+	if (port_ptr->type != CLIENT_PORT)
 		return -EINVAL;
 
 	if (name->addrtype != MSM_IPC_ADDR_NAME)

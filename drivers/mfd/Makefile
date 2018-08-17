@@ -97,8 +97,6 @@ obj-$(CONFIG_WCD9320_CODEC)	+= wcd9xxx-core.o wcd9xxx-irq.o wcd9xxx-slimslave.o\
 						wcd9xxx-core-resource.o
 obj-$(CONFIG_WCD9306_CODEC)	+= wcd9xxx-core.o wcd9xxx-irq.o\
 						wcd9xxx-slimslave.o wcd9xxx-core-resource.o
-obj-$(CONFIG_AK4961_CODEC)	+= ak49xx-core.o ak49xx-irq.o\
-						ak49xx-slimslave.o ak49xx-core-resource.o
 obj-$(CONFIG_WCD9330_CODEC)	+= wcd9xxx-core.o wcd9xxx-irq.o wcd9xxx-slimslave.o\
 						wcd9xxx-core-resource.o
 obj-$(CONFIG_WCD9335_CODEC)	+= wcd9xxx-core.o wcd9xxx-irq.o wcd9xxx-slimslave.o\
@@ -163,6 +161,7 @@ obj-$(CONFIG_MFD_SI476X_CORE)	+= si476x-core.o
 obj-$(CONFIG_MFD_CS5535)	+= cs5535-mfd.o
 obj-$(CONFIG_MFD_OMAP_USB_HOST)	+= omap-usb-host.o omap-usb-tll.o
 obj-$(CONFIG_MFD_PM8921_CORE) 	+= pm8921-core.o
+obj-$(CONFIG_MFD_I2C_PMIC)	+= qcom-i2c-pmic.o
 obj-$(CONFIG_MFD_PM8XXX_IRQ) 	+= pm8xxx-irq.o
 obj-$(CONFIG_TPS65911_COMPARATOR)	+= tps65911-comparator.o
 obj-$(CONFIG_MFD_TPS65090)	+= tps65090.o

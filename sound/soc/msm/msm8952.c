@@ -65,12 +65,6 @@ static int msm_pri_mi2s_rx_ch = 1;
 static int msm_proxy_rx_ch = 2;
 static int msm_vi_feed_tx_ch = 2;
 static int mi2s_rx_bit_format = SNDRV_PCM_FORMAT_S16_LE;
-#if defined(CONFIG_BOARD_JASMINE)||defined(CONFIG_BOARD_GEVJON)
-//static int msm8952_spk_control = 1;
-static int ext_spk_amp_gpio = -1;
-static int msm8952_hds_control = 1;
-int ext_hds_amp_gpio = -1;
-#endif
 
 static atomic_t quat_mi2s_clk_ref;
 static atomic_t quin_mi2s_clk_ref;
@@ -85,10 +79,6 @@ static int msm8952_wsa_switch_event(struct snd_soc_dapm_widget *w,
 			      struct snd_kcontrol *kcontrol, int event);
 static int msm8952_ext_audio_switch_event(struct snd_soc_dapm_widget *w,
 			      struct snd_kcontrol *kcontrol, int event);
-#if defined(CONFIG_BOARD_JASMINE)||defined(CONFIG_BOARD_GEVJON)
-static void msm8952_enable_ext_spk_power_amp(u32 on);
-#endif
-
 /*
  * Android L spec
  * Need to report LINEIN
@@ -102,7 +92,7 @@ static struct wcd_mbhc_config mbhc_cfg = {
 	.swap_gnd_mic = NULL,
 	.hs_ext_micbias = false,
 	.key_code[0] = KEY_MEDIA,
-	.key_code[1] = KEY_VOLUMEUP, //KEY_VOICECOMMAND
+	.key_code[1] = KEY_VOICECOMMAND,
 	.key_code[2] = KEY_VOLUMEUP,
 	.key_code[3] = KEY_VOLUMEDOWN,
 	.key_code[4] = 0,
@@ -112,7 +102,7 @@ static struct wcd_mbhc_config mbhc_cfg = {
 	.linein_th = 5000,
 };
 
-static struct afe_clk_cfg mi2s_rx_clk = {
+static struct afe_clk_cfg mi2s_rx_clk_v1 = {
 	AFE_API_VERSION_I2S_CONFIG,
 	Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ,
 	Q6AFE_LPASS_OSR_CLK_12_P288_MHZ,
@@ -122,7 +112,7 @@ static struct afe_clk_cfg mi2s_rx_clk = {
 	0,
 };
 
-static struct afe_clk_cfg mi2s_tx_clk = {
+static struct afe_clk_cfg mi2s_tx_clk_v1 = {
 	AFE_API_VERSION_I2S_CONFIG,
 	Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ,
 	Q6AFE_LPASS_OSR_CLK_12_P288_MHZ,
@@ -132,7 +122,25 @@ static struct afe_clk_cfg mi2s_tx_clk = {
 	0,
 };
 
-static struct afe_clk_cfg wsa_ana_clk = {
+static struct afe_clk_set mi2s_tx_clk = {
+	AFE_API_VERSION_I2S_CONFIG,
+	Q6AFE_LPASS_CLK_ID_TER_MI2S_IBIT,
+	Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ,
+	Q6AFE_LPASS_CLK_ATTRIBUTE_COUPLE_NO,
+	Q6AFE_LPASS_CLK_ROOT_DEFAULT,
+	0,
+};
+
+static struct afe_clk_set mi2s_rx_clk = {
+	AFE_API_VERSION_I2S_CONFIG,
+	Q6AFE_LPASS_CLK_ID_PRI_MI2S_IBIT,
+	Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ,
+	Q6AFE_LPASS_CLK_ATTRIBUTE_COUPLE_NO,
+	Q6AFE_LPASS_CLK_ROOT_DEFAULT,
+	0,
+};
+
+static struct afe_clk_cfg wsa_ana_clk_v1 = {
 	AFE_API_VERSION_I2S_CONFIG,
 	0,
 	Q6AFE_LPASS_OSR_CLK_9_P600_MHZ,
@@ -141,17 +149,21 @@ static struct afe_clk_cfg wsa_ana_clk = {
 	Q6AFE_LPASS_MODE_CLK2_VALID,
 	0,
 };
+static struct afe_clk_set wsa_ana_clk = {
+	AFE_API_VERSION_I2S_CONFIG,
+	Q6AFE_LPASS_CLK_ID_MCLK_1,
+	Q6AFE_LPASS_OSR_CLK_9_P600_MHZ,
+	Q6AFE_LPASS_CLK_ATTRIBUTE_COUPLE_NO,
+	Q6AFE_LPASS_CLK_ROOT_DEFAULT,
+	0,
+};
 
-static char const *rx_bit_format_text[] = {"S16_LE", "S24_LE"};
+static char const *rx_bit_format_text[] = {"S16_LE", "S24_LE", "S24_3LE"};
 static const char *const ter_mi2s_tx_ch_text[] = {"One", "Two"};
 static const char *const loopback_mclk_text[] = {"DISABLE", "ENABLE"};
 static const char *const proxy_rx_ch_text[] = {"One", "Two", "Three", "Four",
 	"Five", "Six", "Seven", "Eight"};
 static const char *const vi_feed_ch_text[] = {"One", "Two"};
-#if defined(CONFIG_BOARD_JASMINE)||defined(CONFIG_BOARD_GEVJON)
-//static const char *const ext_spk_text[] = {"Off", "On"};
-static const char *const ext_hds_text[] = {"Off", "On"};
-#endif
 
 static inline int param_is_mask(int p)
 {
@@ -176,20 +188,6 @@ static void param_set_mask(struct snd_pcm_hw_params *p, int n, unsigned bit)
 	}
 }
 
-#if defined(CONFIG_BOARD_JASMINE)||defined(CONFIG_BOARD_GEVJON)
-static int msm_ext_spkramp_event(struct snd_soc_dapm_widget *w,
-			     struct snd_kcontrol *k, int event)
-{
-	pr_err("%s() enter msm8952_hds_control( %d )\n", __func__,msm8952_hds_control);
-	if (SND_SOC_DAPM_EVENT_ON(event) && (msm8952_hds_control != 1)) {
-		msm8952_enable_ext_spk_power_amp(1);
-	}else{
-		msm8952_enable_ext_spk_power_amp(0);
-	}
-	return 0;
-}
-#endif
-
 static const struct snd_soc_dapm_widget msm8952_dapm_widgets[] = {
 
 	SND_SOC_DAPM_SUPPLY_S("MCLK", -1, SND_SOC_NOPM, 0, 0,
@@ -199,9 +197,6 @@ static const struct snd_soc_dapm_widget msm8952_dapm_widgets[] = {
 	SND_SOC_DAPM_MIC("Secondary Mic", NULL),
 	SND_SOC_DAPM_MIC("Digital Mic1", NULL),
 	SND_SOC_DAPM_MIC("Digital Mic2", NULL),
-#if defined(CONFIG_BOARD_JASMINE)||defined(CONFIG_BOARD_GEVJON)
-	SND_SOC_DAPM_SPK("Lineout_hph amp", msm_ext_spkramp_event),
-#endif
 	SND_SOC_DAPM_SUPPLY("VDD_WSA_SWITCH", SND_SOC_NOPM, 0, 0,
 	msm8952_wsa_switch_event,
 	SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
@@ -209,7 +204,53 @@ static const struct snd_soc_dapm_widget msm8952_dapm_widgets[] = {
 			    msm8952_ext_audio_switch_event,
 			    SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
 };
+static int msm8952_get_clk_id(int port_id)
+{
+	switch (port_id) {
+	case AFE_PORT_ID_PRIMARY_MI2S_RX:
+		return Q6AFE_LPASS_CLK_ID_PRI_MI2S_IBIT;
+	case AFE_PORT_ID_SECONDARY_MI2S_RX:
+		return Q6AFE_LPASS_CLK_ID_SEC_MI2S_IBIT;
+	case AFE_PORT_ID_TERTIARY_MI2S_TX:
+		return Q6AFE_LPASS_CLK_ID_TER_MI2S_IBIT;
+	case AFE_PORT_ID_QUATERNARY_MI2S_RX:
+	case AFE_PORT_ID_QUATERNARY_MI2S_TX:
+		return Q6AFE_LPASS_CLK_ID_QUAD_MI2S_IBIT;
+	case AFE_PORT_ID_QUINARY_MI2S_RX:
+	case AFE_PORT_ID_QUINARY_MI2S_TX:
+		return Q6AFE_LPASS_CLK_ID_QUI_MI2S_IBIT;
+	case AFE_PORT_ID_SENARY_MI2S_TX:
+		return Q6AFE_LPASS_CLK_ID_SEN_MI2S_IBIT;
+	default:
+		pr_err("%s: invalid port_id: 0x%x\n", __func__, port_id);
+		return -EINVAL;
+	}
+}
 
+static int msm8952_get_port_id(int be_id)
+{
+	switch (be_id) {
+	case MSM_BACKEND_DAI_PRI_MI2S_RX:
+		return AFE_PORT_ID_PRIMARY_MI2S_RX;
+	case MSM_BACKEND_DAI_SECONDARY_MI2S_RX:
+		return AFE_PORT_ID_SECONDARY_MI2S_RX;
+	case MSM_BACKEND_DAI_TERTIARY_MI2S_TX:
+		return AFE_PORT_ID_TERTIARY_MI2S_TX;
+	case MSM_BACKEND_DAI_QUATERNARY_MI2S_RX:
+		return AFE_PORT_ID_QUATERNARY_MI2S_RX;
+	case MSM_BACKEND_DAI_QUATERNARY_MI2S_TX:
+		return AFE_PORT_ID_QUATERNARY_MI2S_TX;
+	case MSM_BACKEND_DAI_QUINARY_MI2S_RX:
+		return AFE_PORT_ID_QUINARY_MI2S_RX;
+	case MSM_BACKEND_DAI_QUINARY_MI2S_TX:
+		return AFE_PORT_ID_QUINARY_MI2S_TX;
+	case MSM_BACKEND_DAI_SENARY_MI2S_TX:
+		return AFE_PORT_ID_SENARY_MI2S_TX;
+	default:
+		pr_err("%s: Invalid be_id: %d\n", __func__, be_id);
+		return -EINVAL;
+	}
+}
 int is_ext_spk_gpio_support(struct platform_device *pdev,
 			struct msm8916_asoc_mach_data *pdata)
 {
@@ -232,97 +273,6 @@ int is_ext_spk_gpio_support(struct platform_device *pdev,
 	}
 	return 0;
 }
-
-#if defined(CONFIG_BOARD_JASMINE)||defined(CONFIG_BOARD_GEVJON)
-// ZTE_ZJB_config_gpio91 start
-static int msm8952_ext_spk_power_amp_init(struct platform_device *pdev,
-			struct msm8916_asoc_mach_data *pdata)
-{
-	int ret = 0;
-	ext_spk_amp_gpio = of_get_named_gpio(pdev->dev.of_node,
-		"qcom,ext-spk-amp-gpio", 0);
-	pr_debug("%s: zhujb external speaker gpio: %d",__func__, ext_spk_amp_gpio);
-	if (ext_spk_amp_gpio >= 0) {
-		ret = gpio_request(ext_spk_amp_gpio, "ext_spk_amp_gpio");
-		if (ret) {
-			pr_err("%s: gpio_request failed for ext_spk_amp_gpio.\n",
-				__func__);
-			return -EINVAL;
-		}
-		gpio_direction_output(ext_spk_amp_gpio, 0);
-	}
-	return 0;
-}
-
-static void msm8952_enable_ext_spk_power_amp(u32 on)
-{
-	if (on) {
-		/*select mode 6*/
-		gpio_direction_output(ext_spk_amp_gpio, 1);
-		udelay(1);
-		gpio_direction_output(ext_spk_amp_gpio, 0);
-		udelay(1);
-		gpio_direction_output(ext_spk_amp_gpio, 1);
-		udelay(1);
-		gpio_direction_output(ext_spk_amp_gpio, 0);
-		udelay(1);
-		gpio_direction_output(ext_spk_amp_gpio, 1);
-		udelay(1);
-		gpio_direction_output(ext_spk_amp_gpio, 0);
-		udelay(1);
-		gpio_direction_output(ext_spk_amp_gpio, 1);
-		udelay(1);
-		gpio_direction_output(ext_spk_amp_gpio, 0);
-		udelay(1);
-		gpio_direction_output(ext_spk_amp_gpio, 1);
-		udelay(1);
-		gpio_direction_output(ext_spk_amp_gpio, 0);
-		udelay(1);
-		gpio_direction_output(ext_spk_amp_gpio, 1);
-	} else {
-		gpio_direction_output(ext_spk_amp_gpio, on);
-		usleep_range(2000,3000);
-	}
-	pr_err("%s: %s external speaker PAs.\n", __func__,
-			on ? "Enable" : "Disable");
-}
-// ZTE_ZJB_config_gpio91 end
-#endif
-
-#if defined(CONFIG_BOARD_JASMINE)||defined(CONFIG_BOARD_GEVJON)
-// ZTE_ZJB_config_gpio63 start
-static int msm8952_ext_hds_power_amp_init(struct platform_device *pdev,
-			struct msm8916_asoc_mach_data *pdata)
-{
-	int ret = 0;
-	ext_hds_amp_gpio = of_get_named_gpio(pdev->dev.of_node,
-		"qcom,ext-headset-amp-gpio", 0);
-	pr_debug("%s: zhujb external headset gpio: %d",__func__, ext_hds_amp_gpio);
-	if (ext_hds_amp_gpio >= 0) {
-		ret = gpio_request(ext_hds_amp_gpio, "ext_spk_amp_gpio");
-		if (ret) {
-			pr_err("%s: gpio_request failed for ext_spk_amp_gpio.\n",
-				__func__);
-			return -EINVAL;
-		}
-		gpio_direction_output(ext_hds_amp_gpio, 0);
-	}
-	return 0;
-}
-
-static void msm8952_enable_ext_hds_power_amp(u32 on)
-{
-	if (on) {
-		gpio_direction_output(ext_hds_amp_gpio, 1);
-		udelay(200);
-	} else {
-		gpio_direction_output(ext_hds_amp_gpio, 0);
-        udelay(200);
-	}
-	pr_err("%s: %s headset PAs.\n", __func__,on ? "Enable" : "Disable");
-}
-// ZTE_ZJB_config_gpio63 end
-#endif
 
 static int ext_audio_switch_support(struct platform_device *pdev,
 			struct msm8916_asoc_mach_data *pdata)
@@ -641,185 +591,128 @@ static int msm_mi2s_snd_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int quat_mi2s_sclk_ctl(struct snd_pcm_substream *substream, bool enable)
+
+static uint32_t get_mi2s_rx_clk_val(int port_id)
 {
-	int ret = 0;
-
-	if (enable) {
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-			if (mi2s_rx_bit_format == SNDRV_PCM_FORMAT_S24_LE)
-				mi2s_rx_clk.clk_val1 =
-					Q6AFE_LPASS_IBIT_CLK_3_P072_MHZ;
-			else
-				mi2s_rx_clk.clk_val1 =
-					Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ;
-			ret = afe_set_lpass_clock(
-					AFE_PORT_ID_QUATERNARY_MI2S_RX,
-					&mi2s_rx_clk);
-		} else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
-			mi2s_tx_clk.clk_val1 = Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ;
-			ret = afe_set_lpass_clock(
-					AFE_PORT_ID_QUATERNARY_MI2S_TX,
-					&mi2s_tx_clk);
-		} else {
-			pr_err("%s:Not valid substream.\n", __func__);
-		}
-
-		if (ret < 0)
-			pr_err("%s:afe_set_lpass_clock failed\n", __func__);
-
-	} else {
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-			mi2s_rx_clk.clk_val1 = Q6AFE_LPASS_IBIT_CLK_DISABLE;
-			ret = afe_set_lpass_clock(
-					AFE_PORT_ID_QUATERNARY_MI2S_RX,
-					&mi2s_rx_clk);
-		} else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
-			mi2s_tx_clk.clk_val1 = Q6AFE_LPASS_IBIT_CLK_DISABLE;
-			ret = afe_set_lpass_clock(
-					AFE_PORT_ID_QUATERNARY_MI2S_TX,
-					&mi2s_tx_clk);
-		} else {
-			pr_err("%s:Not valid substream.\n", __func__);
-		}
-
-		if (ret < 0)
-			pr_err("%s:afe_set_lpass_clock failed\n", __func__);
-	}
-	return ret;
+	if (mi2s_rx_bit_format == SNDRV_PCM_FORMAT_S24_LE)
+		return Q6AFE_LPASS_IBIT_CLK_3_P072_MHZ;
+	else
+		return Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ;
 }
 
-static int quin_mi2s_sclk_ctl(struct snd_pcm_substream *substream, bool enable)
-{
-	int ret = 0;
 
-	if (enable) {
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-			if (mi2s_rx_bit_format == SNDRV_PCM_FORMAT_S24_LE)
-				mi2s_rx_clk.clk_val1 =
-					Q6AFE_LPASS_IBIT_CLK_3_P072_MHZ;
-			else
-				mi2s_rx_clk.clk_val1 =
-					Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ;
-			ret = afe_set_lpass_clock(
-					AFE_PORT_ID_QUINARY_MI2S_RX,
-					&mi2s_rx_clk);
-		} else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
-			mi2s_tx_clk.clk_val1 = Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ;
-			ret = afe_set_lpass_clock(
-					AFE_PORT_ID_QUINARY_MI2S_TX,
-					&mi2s_tx_clk);
-		} else {
-			pr_err("%s:Not valid substream.\n", __func__);
-		}
-
-		if (ret < 0)
-			pr_err("%s:afe_set_lpass_clock failed\n", __func__);
-
-	} else {
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-			mi2s_rx_clk.clk_val1 = Q6AFE_LPASS_IBIT_CLK_DISABLE;
-			ret = afe_set_lpass_clock(
-					AFE_PORT_ID_QUINARY_MI2S_RX,
-					&mi2s_rx_clk);
-		} else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
-			mi2s_tx_clk.clk_val1 = Q6AFE_LPASS_IBIT_CLK_DISABLE;
-			ret = afe_set_lpass_clock(
-					AFE_PORT_ID_QUINARY_MI2S_TX,
-					&mi2s_tx_clk);
-		} else {
-			pr_err("%s:Not valid substream.\n", __func__);
-		}
-
-		if (ret < 0)
-			pr_err("%s:afe_set_lpass_clock failed\n", __func__);
-	}
-	return ret;
-}
-
-static int sec_mi2s_sclk_ctl(struct snd_pcm_substream *substream, bool enable)
-{
-	int ret = 0;
-
-	if (enable) {
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-			if (mi2s_rx_bit_format == SNDRV_PCM_FORMAT_S24_LE)
-				mi2s_rx_clk.clk_val1 =
-					Q6AFE_LPASS_IBIT_CLK_3_P072_MHZ;
-			else
-				mi2s_rx_clk.clk_val1 =
-					Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ;
-			ret = afe_set_lpass_clock(AFE_PORT_ID_SECONDARY_MI2S_RX,
-						  &mi2s_rx_clk);
-		} else
-			pr_err("%s:Not valid substream.\n", __func__);
-
-		if (ret < 0)
-			pr_err("%s:afe_set_lpass_clock failed\n", __func__);
-
-	} else {
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-			mi2s_rx_clk.clk_val1 = Q6AFE_LPASS_IBIT_CLK_DISABLE;
-			ret = afe_set_lpass_clock(AFE_PORT_ID_SECONDARY_MI2S_RX,
-						  &mi2s_rx_clk);
-		} else
-			pr_err("%s:Not valid substream.\n", __func__);
-
-		if (ret < 0)
-			pr_err("%s:afe_set_lpass_clock failed\n", __func__);
-	}
-	return ret;
-}
-
-static int mi2s_clk_ctl(struct snd_pcm_substream *substream, bool enable)
+static int msm_mi2s_sclk_ctl(struct snd_pcm_substream *substream, bool enable)
 {
 	int ret = 0;
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	int port_id = 0;
 
-	switch (rtd->dai_link->be_id) {
-	case MSM_BACKEND_DAI_SENARY_MI2S_TX:
-		port_id = AFE_PORT_ID_SENARY_MI2S_TX;
-		break;
-	case MSM_BACKEND_DAI_TERTIARY_MI2S_TX:
-	default:
-		port_id = AFE_PORT_ID_TERTIARY_MI2S_TX;
-		break;
+	port_id = msm8952_get_port_id(rtd->dai_link->be_id);
+	if (port_id < 0) {
+		pr_err("%s: Invalid port_id\n", __func__);
+		return -EINVAL;
 	}
-
 	if (enable) {
 		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-			if (mi2s_rx_bit_format == SNDRV_PCM_FORMAT_S24_LE)
-				mi2s_rx_clk.clk_val1 =
-					Q6AFE_LPASS_IBIT_CLK_3_P072_MHZ;
-			else
-				mi2s_rx_clk.clk_val1 =
-					Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ;
-			ret = afe_set_lpass_clock(AFE_PORT_ID_PRIMARY_MI2S_RX,
-						  &mi2s_rx_clk);
+			switch (q6core_get_avs_version()) {
+			case (Q6_SUBSYS_AVS2_6):
+				mi2s_rx_clk_v1.clk_val1 =
+						get_mi2s_rx_clk_val(port_id);
+				ret = afe_set_lpass_clock(port_id,
+							&mi2s_rx_clk_v1);
+				break;
+			case (Q6_SUBSYS_AVS2_7):
+				mi2s_rx_clk.enable = enable;
+				mi2s_rx_clk.clk_id =
+						msm8952_get_clk_id(port_id);
+				mi2s_rx_clk.clk_freq_in_hz =
+						get_mi2s_rx_clk_val(port_id);
+				ret = afe_set_lpass_clock_v2(port_id,
+							&mi2s_rx_clk);
+				break;
+			case (Q6_SUBSYS_INVALID):
+			default:
+				ret = -EINVAL;
+				pr_err("%s: INVALID AVS IMAGE\n", __func__);
+				break;
+			}
 		} else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
-			mi2s_tx_clk.clk_val1 = Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ;
-			ret = afe_set_lpass_clock(port_id, &mi2s_tx_clk);
-		} else
+			switch (q6core_get_avs_version()) {
+			case (Q6_SUBSYS_AVS2_6):
+				mi2s_tx_clk_v1.clk_val1 =
+						Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ;
+				ret = afe_set_lpass_clock(port_id,
+							&mi2s_tx_clk_v1);
+				break;
+			case (Q6_SUBSYS_AVS2_7):
+				mi2s_tx_clk.enable = enable;
+				mi2s_tx_clk.clk_id =
+						msm8952_get_clk_id(port_id);
+				mi2s_tx_clk.clk_freq_in_hz =
+						Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ;
+				ret = afe_set_lpass_clock_v2(port_id,
+							&mi2s_tx_clk);
+				break;
+			case (Q6_SUBSYS_INVALID):
+			default:
+				ret = -EINVAL;
+				pr_err("%s: INVALID AVS IMAGE\n", __func__);
+				break;
+			}
+		} else {
 			pr_err("%s:Not valid substream.\n", __func__);
+		}
 
 		if (ret < 0)
-			pr_err("%s:afe_set_lpass_clock failed\n", __func__);
-
+			pr_err("%s:afe_set_lpass_clock_v2 failed\n", __func__);
 	} else {
 		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-			mi2s_rx_clk.clk_val1 = Q6AFE_LPASS_IBIT_CLK_DISABLE;
-			ret = afe_set_lpass_clock(AFE_PORT_ID_PRIMARY_MI2S_RX,
-						  &mi2s_rx_clk);
+			switch (q6core_get_avs_version()) {
+			case (Q6_SUBSYS_AVS2_6):
+				mi2s_rx_clk_v1.clk_val1 =
+						Q6AFE_LPASS_IBIT_CLK_DISABLE;
+				ret = afe_set_lpass_clock(port_id,
+							&mi2s_rx_clk_v1);
+				break;
+			case (Q6_SUBSYS_AVS2_7):
+				mi2s_rx_clk.enable = enable;
+				mi2s_rx_clk.clk_id =
+						msm8952_get_clk_id(port_id);
+				ret = afe_set_lpass_clock_v2(port_id,
+							&mi2s_rx_clk);
+				break;
+			case (Q6_SUBSYS_INVALID):
+			default:
+				ret = -EINVAL;
+				pr_err("%s: INVALID AVS IMAGE\n", __func__);
+				break;
+			}
 		} else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
-			mi2s_tx_clk.clk_val1 = Q6AFE_LPASS_IBIT_CLK_DISABLE;
-			ret = afe_set_lpass_clock(port_id, &mi2s_tx_clk);
-		} else
+			switch (q6core_get_avs_version()) {
+			case (Q6_SUBSYS_AVS2_6):
+				mi2s_tx_clk_v1.clk_val1 =
+						Q6AFE_LPASS_IBIT_CLK_DISABLE;
+				ret = afe_set_lpass_clock(port_id,
+							&mi2s_tx_clk_v1);
+				break;
+			case (Q6_SUBSYS_AVS2_7):
+				mi2s_tx_clk.enable = enable;
+				mi2s_tx_clk.clk_id =
+						msm8952_get_clk_id(port_id);
+				ret = afe_set_lpass_clock_v2(port_id,
+							&mi2s_tx_clk);
+				break;
+			case (Q6_SUBSYS_INVALID):
+			default:
+				ret = -EINVAL;
+				pr_err("%s: INVALID AVS IMAGE\n", __func__);
+				break;
+			}
+		} else {
 			pr_err("%s:Not valid substream.\n", __func__);
-
+		}
 		if (ret < 0)
-			pr_err("%s:afe_set_lpass_clock failed\n", __func__);
-
+			pr_err("%s:afe_set_lpass_clock_v2 failed\n", __func__);
 	}
 	return ret;
 }
@@ -840,11 +733,27 @@ static int msm8952_enable_dig_cdc_clk(struct snd_soc_codec *codec,
 					&pdata->disable_mclk_work);
 			mutex_lock(&pdata->cdc_mclk_mutex);
 			if (atomic_read(&pdata->mclk_enabled) == false) {
-				pdata->digital_cdc_clk.clk_val =
-							pdata->mclk_freq;
-				ret = afe_set_digital_codec_core_clock(
+				switch (q6core_get_avs_version()) {
+				case Q6_SUBSYS_AVS2_6:
+					pdata->digital_cdc_clk.clk_val =
+						pdata->mclk_freq;
+					ret = afe_set_digital_codec_core_clock(
 						AFE_PORT_ID_PRIMARY_MI2S_RX,
 						&pdata->digital_cdc_clk);
+					break;
+				case Q6_SUBSYS_AVS2_7:
+					pdata->digital_cdc_core_clk.enable = 1;
+					ret = afe_set_lpass_clock_v2(
+						AFE_PORT_ID_PRIMARY_MI2S_RX,
+						&pdata->digital_cdc_core_clk);
+					break;
+				case Q6_SUBSYS_INVALID:
+				default:
+					ret = -EINVAL;
+					pr_err("%s: enable clk failed\n",
+								__func__);
+					break;
+				}
 				if (ret < 0) {
 					pr_err("%s: failed to enable MCLK\n",
 							__func__);
@@ -860,10 +769,28 @@ static int msm8952_enable_dig_cdc_clk(struct snd_soc_codec *codec,
 		cancel_delayed_work_sync(&pdata->disable_mclk_work);
 		mutex_lock(&pdata->cdc_mclk_mutex);
 		if (atomic_read(&pdata->mclk_enabled) == true) {
-			pdata->digital_cdc_clk.clk_val = 0;
-			ret = afe_set_digital_codec_core_clock(
+			switch (q6core_get_avs_version()) {
+			case Q6_SUBSYS_AVS2_6:
+				pdata->digital_cdc_clk.clk_val = 0;
+				ret = afe_set_digital_codec_core_clock(
 					AFE_PORT_ID_PRIMARY_MI2S_RX,
 					&pdata->digital_cdc_clk);
+				break;
+			case Q6_SUBSYS_AVS2_7:
+				pdata->digital_cdc_core_clk.enable = 0;
+				ret = afe_set_lpass_clock_v2(
+					AFE_PORT_ID_PRIMARY_MI2S_RX,
+					&pdata->digital_cdc_core_clk);
+				break;
+			case Q6_SUBSYS_INVALID:
+			default:
+			{
+				ret = -EINVAL;
+				pr_err("%s: disable clk failed\n",
+							__func__);
+				break;
+			}
+			}
 			if (ret < 0)
 				pr_err("%s: failed to disable MCLK\n",
 						__func__);
@@ -906,6 +833,10 @@ static int mi2s_rx_bit_format_get(struct snd_kcontrol *kcontrol,
 {
 
 	switch (mi2s_rx_bit_format) {
+	case SNDRV_PCM_FORMAT_S24_3LE:
+		ucontrol->value.integer.value[0] = 2;
+		break;
+
 	case SNDRV_PCM_FORMAT_S24_LE:
 		ucontrol->value.integer.value[0] = 1;
 		break;
@@ -927,6 +858,9 @@ static int mi2s_rx_bit_format_put(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	switch (ucontrol->value.integer.value[0]) {
+	case 2:
+		mi2s_rx_bit_format = SNDRV_PCM_FORMAT_S24_3LE;
+		break;
 	case 1:
 		mi2s_rx_bit_format = SNDRV_PCM_FORMAT_S24_LE;
 		break;
@@ -967,10 +901,32 @@ static int loopback_mclk_put(struct snd_kcontrol *kcontrol,
 		mutex_lock(&pdata->cdc_mclk_mutex);
 		if ((!atomic_read(&pdata->mclk_rsc_ref)) &&
 				(!atomic_read(&pdata->mclk_enabled))) {
-			pdata->digital_cdc_clk.clk_val = pdata->mclk_freq;
-			ret = afe_set_digital_codec_core_clock(
+			switch (q6core_get_avs_version()) {
+			case (Q6_SUBSYS_AVS2_6):
+			{
+				pdata->digital_cdc_clk.clk_val =
+							pdata->mclk_freq;
+				ret = afe_set_digital_codec_core_clock(
 					AFE_PORT_ID_PRIMARY_MI2S_RX,
 					&pdata->digital_cdc_clk);
+					break;
+			}
+			case (Q6_SUBSYS_AVS2_7):
+			{
+				pdata->digital_cdc_core_clk.enable = 1;
+				ret = afe_set_lpass_clock_v2(
+					AFE_PORT_ID_PRIMARY_MI2S_RX,
+					&pdata->digital_cdc_core_clk);
+					break;
+			}
+			case (Q6_SUBSYS_INVALID):
+			default:
+			{
+				ret = -EINVAL;
+				pr_err("%s: unknown dsp image\n", __func__);
+				break;
+			}
+			}
 			if (ret < 0) {
 				pr_err("%s: failed to enable the MCLK: %d\n",
 						__func__, ret);
@@ -995,10 +951,31 @@ static int loopback_mclk_put(struct snd_kcontrol *kcontrol,
 		mutex_lock(&pdata->cdc_mclk_mutex);
 		if ((!atomic_dec_return(&pdata->mclk_rsc_ref)) &&
 				(atomic_read(&pdata->mclk_enabled))) {
-			pdata->digital_cdc_clk.clk_val = 0;
-			ret = afe_set_digital_codec_core_clock(
+			switch (q6core_get_avs_version()) {
+			case (Q6_SUBSYS_AVS2_6):
+			{
+				pdata->digital_cdc_clk.clk_val = 0;
+				ret = afe_set_digital_codec_core_clock(
 					AFE_PORT_ID_PRIMARY_MI2S_RX,
 					&pdata->digital_cdc_clk);
+					break;
+			}
+			case (Q6_SUBSYS_AVS2_7):
+			{
+				pdata->digital_cdc_core_clk.enable = 0;
+				ret = afe_set_lpass_clock_v2(
+					AFE_PORT_ID_PRIMARY_MI2S_RX,
+					&pdata->digital_cdc_core_clk);
+					break;
+			}
+			case (Q6_SUBSYS_INVALID):
+			default:
+			{
+				ret = -EINVAL;
+				pr_err("%s: unknown dsp image\n", __func__);
+				break;
+			}
+			}
 			if (ret < 0) {
 				pr_err("%s: failed to disable the MCLK: %d\n",
 						__func__, ret);
@@ -1075,91 +1052,6 @@ static int msm_vi_feed_tx_ch_put(struct snd_kcontrol *kcontrol,
 	return 1;
 }
 
-#if 0//defined(CONFIG_BOARD_JASMINE)
-// ZTE_ZJB_config_gpio91 start
-static int spk_amp_get(struct snd_kcontrol *kcontrol,
-		       struct snd_ctl_elem_value *ucontrol)
-{
-	pr_debug("%s: zhujb:spk_amp_get msm8952_spk_control(%d)\n",
-			 __func__, msm8952_spk_control);
-	ucontrol->value.integer.value[0] = msm8952_spk_control;
-	return 0;
-}
-
-static int spk_amp_put(struct snd_kcontrol *kcontrol,
-		       struct snd_ctl_elem_value *ucontrol)
-{
-	int ret;
-
-	pr_debug("%s:zhujb spk_amp_put msm8952_spk_control(%d), put val(%ld)\n",
-			 __func__, msm8952_spk_control, ucontrol->value.integer.value[0]);
-
-	if (msm8952_spk_control == ucontrol->value.integer.value[0])
-		return 0;
-
-	msm8952_spk_control = ucontrol->value.integer.value[0];
-
-	if (msm8952_spk_control)
-	{
-		msm8952_enable_ext_spk_power_amp(1);
-		if (ret < 0)
-		    pr_err("%s:A80 gpio91 set cannot be activated %s\n",
-				 __func__, "spk_amp_gpio");
-	}
-	else
-	{
-		msm8952_enable_ext_spk_power_amp(0);
-		if (ret < 0)
-		    pr_err("%s:A80 gpio91 set cannot be de-activated %s\n",
-				 __func__, "spk_amp_gpio");
-	}
-	return 1;
-}
-// ZTE_ZJB_config_gpio91 end
-#endif
-
-#if defined(CONFIG_BOARD_JASMINE)||defined(CONFIG_BOARD_GEVJON)
-// ZTE_ZJB_config_gpio63 start
-static int hds_amp_get(struct snd_kcontrol *kcontrol,
-		       struct snd_ctl_elem_value *ucontrol)
-{
-	pr_debug("%s: zhujb:hds_amp_get msm8952_hds_control(%d)\n",
-			 __func__, msm8952_hds_control);
-	ucontrol->value.integer.value[0] = msm8952_hds_control;
-	return 0;
-}
-
-static int hds_amp_put(struct snd_kcontrol *kcontrol,
-		       struct snd_ctl_elem_value *ucontrol)
-{
-	int ret;
-
-	pr_debug("%s:zhujb hds_amp_put msm8952_hds_control(%d), put val(%ld)\n",
-			 __func__, msm8952_hds_control, ucontrol->value.integer.value[0]);
-
-	if (msm8952_hds_control == ucontrol->value.integer.value[0])
-		return 0;
-
-	msm8952_hds_control = ucontrol->value.integer.value[0];
-
-	if (msm8952_hds_control)
-	{
-		msm8952_enable_ext_hds_power_amp(1);
-		if (ret < 0)
-		    pr_err("%s:A80 gpio63 set cannot be activated %s\n",
-				 __func__, "hds_amp_gpio");
-	}
-	else
-	{
-		msm8952_enable_ext_hds_power_amp(0);
-		if (ret < 0)
-		    pr_err("%s:A80 gpio63 set cannot be de-activated %s\n",
-				 __func__, "hds_amp_gpio");
-	}
-	return 1;
-}
-// ZTE_ZJB_config_gpio63 end
-#endif
 
 static const struct soc_enum msm_snd_enum[] = {
 	SOC_ENUM_SINGLE_EXT(2, rx_bit_format_text),
@@ -1167,10 +1059,6 @@ static const struct soc_enum msm_snd_enum[] = {
 	SOC_ENUM_SINGLE_EXT(2, loopback_mclk_text),
 	SOC_ENUM_SINGLE_EXT(8, proxy_rx_ch_text),
 	SOC_ENUM_SINGLE_EXT(2, vi_feed_ch_text),
-#if defined(CONFIG_BOARD_JASMINE)||defined(CONFIG_BOARD_GEVJON)
-	//SOC_ENUM_SINGLE_EXT(2, ext_spk_text),
-	SOC_ENUM_SINGLE_EXT(2, ext_hds_text),
-#endif
 };
 
 static const char *const btsco_rate_text[] = {"BTSCO_RATE_8KHZ",
@@ -1194,12 +1082,7 @@ static const struct snd_kcontrol_new msm_snd_controls[] = {
 			msm_proxy_rx_ch_get, msm_proxy_rx_ch_put),
 	SOC_ENUM_EXT("VI_FEED_TX Channels", msm_snd_enum[4],
 			msm_vi_feed_tx_ch_get, msm_vi_feed_tx_ch_put),
-#if defined(CONFIG_BOARD_JASMINE)||defined(CONFIG_BOARD_GEVJON)
-	//SOC_ENUM_EXT("Spk Amp Switch", msm_snd_enum[5], spk_amp_get,
-	//			spk_amp_put),
-	SOC_ENUM_EXT("Hds GPIO Switch", msm_snd_enum[5], hds_amp_get,
-				hds_amp_put),
-#endif
+
 };
 
 static int msm8952_mclk_event(struct snd_soc_dapm_widget *w,
@@ -1316,11 +1199,32 @@ static int msm8952_enable_wsa_mclk(struct snd_soc_card *card, bool enable)
 	mutex_lock(&pdata->wsa_mclk_mutex);
 	if (enable) {
 		if (!atomic_read(&pdata->wsa_mclk_rsc_ref)) {
-			wsa_ana_clk.clk_val2 =
+			switch (q6core_get_avs_version()) {
+			case (Q6_SUBSYS_AVS2_6):
+			{
+				wsa_ana_clk_v1.clk_val2 =
 					Q6AFE_LPASS_OSR_CLK_9_P600_MHZ;
-			ret = afe_set_lpass_clock(
+				ret = afe_set_lpass_clock(
 					AFE_PORT_ID_PRIMARY_MI2S_RX,
-					&wsa_ana_clk);
+					&wsa_ana_clk_v1);
+					break;
+			}
+			case (Q6_SUBSYS_AVS2_7):
+			{
+				wsa_ana_clk.enable = enable;
+				ret = afe_set_lpass_clock_v2(
+						AFE_PORT_ID_PRIMARY_MI2S_RX,
+						&wsa_ana_clk);
+					break;
+			}
+			case (Q6_SUBSYS_INVALID):
+			default:
+			{
+				ret = -EINVAL;
+				pr_err("%s: unknown dsp image\n", __func__);
+				break;
+			}
+			}
 			if (ret < 0) {
 				pr_err("%s: failed to enable mclk %d\n",
 					__func__, ret);
@@ -1332,11 +1236,32 @@ static int msm8952_enable_wsa_mclk(struct snd_soc_card *card, bool enable)
 		if (!atomic_read(&pdata->wsa_mclk_rsc_ref))
 			goto done;
 		if (!atomic_dec_return(&pdata->wsa_mclk_rsc_ref)) {
-			wsa_ana_clk.clk_val2 =
+			switch (q6core_get_avs_version()) {
+			case (Q6_SUBSYS_AVS2_6):
+			{
+				wsa_ana_clk_v1.clk_val2 =
 					Q6AFE_LPASS_OSR_CLK_DISABLE;
-			ret = afe_set_lpass_clock(
+				ret = afe_set_lpass_clock(
 					AFE_PORT_ID_PRIMARY_MI2S_RX,
+						&wsa_ana_clk_v1);
+					break;
+			}
+			case (Q6_SUBSYS_AVS2_7):
+			{
+				wsa_ana_clk.enable = enable;
+				ret = afe_set_lpass_clock_v2(
+				AFE_PORT_ID_PRIMARY_MI2S_RX,
 					&wsa_ana_clk);
+					break;
+			}
+			case (Q6_SUBSYS_INVALID):
+			default:
+			{
+				ret = -EINVAL;
+				pr_err("%s: unknown dsp image\n", __func__);
+				break;
+			}
+			}
 			if (ret < 0) {
 				pr_err("%s: failed to disable mclk %d\n",
 					__func__, ret);
@@ -1383,7 +1308,7 @@ static int msm_mi2s_snd_startup(struct snd_pcm_substream *substream)
 		iowrite32(val, pdata->vaddr_gpio_mux_mic_ctl);
 	}
 
-	ret = mi2s_clk_ctl(substream, true);
+	ret = msm_mi2s_sclk_ctl(substream, true);
 	if (ret < 0) {
 		pr_err("%s: failed to enable sclk %d\n",
 				__func__, ret);
@@ -1427,7 +1352,7 @@ static void msm_mi2s_snd_shutdown(struct snd_pcm_substream *substream)
 	pr_debug("%s(): substream = %s  stream = %d\n", __func__,
 			substream->name, substream->stream);
 
-	ret = mi2s_clk_ctl(substream, false);
+	ret = msm_mi2s_sclk_ctl(substream, false);
 	if (ret < 0)
 		pr_err("%s:clock disable failed; ret=%d\n", __func__,
 				ret);
@@ -1539,7 +1464,7 @@ static int msm_sec_mi2s_snd_startup(struct snd_pcm_substream *substream)
 			val = val | 0x0004835c;
 			iowrite32(val, pdata->vaddr_gpio_mux_spkr_ctl);
 		}
-		ret = sec_mi2s_sclk_ctl(substream, true);
+		ret = msm_mi2s_sclk_ctl(substream, true);
 		if (ret < 0) {
 			pr_err("failed to enable sclk\n");
 			return ret;
@@ -1567,7 +1492,7 @@ static int msm_sec_mi2s_snd_startup(struct snd_pcm_substream *substream)
 	}
 	return ret;
 err:
-	ret = sec_mi2s_sclk_ctl(substream, false);
+	ret = msm_mi2s_sclk_ctl(substream, false);
 	if (ret < 0)
 		pr_err("failed to disable sclk\n");
 	return ret;
@@ -1589,7 +1514,7 @@ static void msm_sec_mi2s_snd_shutdown(struct snd_pcm_substream *substream)
 					__func__, "sec_i2s");
 			return;
 		}
-		ret = sec_mi2s_sclk_ctl(substream, false);
+		ret = msm_mi2s_sclk_ctl(substream, false);
 		if (ret < 0)
 			pr_err("%s:clock disable failed\n", __func__);
 	}
@@ -1617,7 +1542,7 @@ static int msm_quat_mi2s_snd_startup(struct snd_pcm_substream *substream)
 			val = val | 0x02020002;
 			iowrite32(val, pdata->vaddr_gpio_mux_mic_ctl);
 		}
-		ret = quat_mi2s_sclk_ctl(substream, true);
+		ret = msm_mi2s_sclk_ctl(substream, true);
 		if (ret < 0) {
 			pr_err("failed to enable sclk\n");
 			return ret;
@@ -1637,7 +1562,7 @@ static int msm_quat_mi2s_snd_startup(struct snd_pcm_substream *substream)
 	}
 	return ret;
 err:
-	ret = quat_mi2s_sclk_ctl(substream, false);
+	ret = msm_mi2s_sclk_ctl(substream, false);
 	if (ret < 0)
 		pr_err("failed to disable sclk\n");
 	return ret;
@@ -1653,7 +1578,7 @@ static void msm_quat_mi2s_snd_shutdown(struct snd_pcm_substream *substream)
 	pr_debug("%s(): substream = %s  stream = %d\n", __func__,
 				substream->name, substream->stream);
 	if ((pdata->ext_pa & QUAT_MI2S_ID) == QUAT_MI2S_ID) {
-		ret = quat_mi2s_sclk_ctl(substream, false);
+		ret = msm_mi2s_sclk_ctl(substream, false);
 		if (ret < 0)
 			pr_err("%s:clock disable failed\n", __func__);
 		if (atomic_read(&quat_mi2s_clk_ref) > 0)
@@ -1691,7 +1616,7 @@ static int msm_quin_mi2s_snd_startup(struct snd_pcm_substream *substream)
 	} else {
 		return -EINVAL;
 	}
-	ret = quin_mi2s_sclk_ctl(substream, true);
+	ret = msm_mi2s_sclk_ctl(substream, true);
 	if (ret < 0) {
 		pr_err("failed to enable sclk\n");
 		return ret;
@@ -1708,7 +1633,7 @@ static int msm_quin_mi2s_snd_startup(struct snd_pcm_substream *substream)
 	}
 	return ret;
 err:
-	ret = quin_mi2s_sclk_ctl(substream, false);
+	ret = msm_mi2s_sclk_ctl(substream, false);
 	if (ret < 0)
 		pr_err("failed to disable sclk\n");
 	return ret;
@@ -1724,7 +1649,7 @@ static void msm_quin_mi2s_snd_shutdown(struct snd_pcm_substream *substream)
 	pr_debug("%s(): substream = %s  stream = %d\n", __func__,
 				substream->name, substream->stream);
 	if ((pdata->ext_pa & QUIN_MI2S_ID) == QUIN_MI2S_ID) {
-		ret = quin_mi2s_sclk_ctl(substream, false);
+		ret = msm_mi2s_sclk_ctl(substream, false);
 		if (ret < 0)
 			pr_err("%s:clock disable failed\n", __func__);
 		if (atomic_read(&quin_mi2s_clk_ref) > 0)
@@ -1775,12 +1700,12 @@ static void *def_msm8952_wcd_mbhc_cal(void)
 	 * 210-290 == Button 2
 	 * 360-680 == Button 3
 	 */
-	btn_low[0] = 100;
-	btn_high[0] = 100;
+	btn_low[0] = 75;
+	btn_high[0] = 75;
 	btn_low[1] = 150;
 	btn_high[1] = 150;
-	btn_low[2] = 200;
-	btn_high[2] = 200;
+	btn_low[2] = 225;
+	btn_high[2] = 225;
 	btn_low[3] = 450;
 	btn_high[3] = 450;
 	btn_low[4] = 500;
@@ -1819,9 +1744,6 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_ignore_suspend(dapm, "DMIC1");
 	snd_soc_dapm_ignore_suspend(dapm, "DMIC2");
 	snd_soc_dapm_ignore_suspend(dapm, "WSA_SPK OUT");
-#if defined(CONFIG_BOARD_JASMINE)||defined(CONFIG_BOARD_GEVJON)
-	snd_soc_dapm_ignore_suspend(dapm, "Lineout_hph amp");
-#endif
 
 	snd_soc_dapm_sync(dapm);
 
@@ -2460,13 +2382,8 @@ static struct snd_soc_dai_link msm8952_dai[] = {
 		.stream_name = "Quaternary MI2S Playback",
 		.cpu_dai_name = "msm-dai-q6-mi2s.3",
 		.platform_name = "msm-pcm-routing",
-#if defined(CONFIG_SND_SOC_AK4375)		
-		.codec_dai_name = "ak4375-AIF1",
-		.codec_name = "ak4375",
-#else		
 		.codec_dai_name = "snd-soc-dummy-dai",
 		.codec_name = "snd-soc-dummy",
-#endif		
 		.no_pcm = 1,
 		.be_id = MSM_BACKEND_DAI_QUATERNARY_MI2S_RX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
@@ -2727,10 +2644,31 @@ void msm8952_disable_mclk(struct work_struct *work)
 	if (atomic_read(&pdata->mclk_enabled) == true
 			&& atomic_read(&pdata->mclk_rsc_ref) == 0) {
 		pr_debug("Disable the mclk\n");
-		pdata->digital_cdc_clk.clk_val = 0;
-		ret = afe_set_digital_codec_core_clock(
+		switch (q6core_get_avs_version()) {
+		case (Q6_SUBSYS_AVS2_6):
+		{
+			pdata->digital_cdc_clk.clk_val = 0;
+			ret = afe_set_digital_codec_core_clock(
 				AFE_PORT_ID_PRIMARY_MI2S_RX,
 				&pdata->digital_cdc_clk);
+				break;
+		}
+		case (Q6_SUBSYS_AVS2_7):
+		{
+			pdata->digital_cdc_core_clk.enable = 0;
+			ret = afe_set_lpass_clock_v2(
+				AFE_PORT_ID_PRIMARY_MI2S_RX,
+				&pdata->digital_cdc_core_clk);
+				break;
+		}
+		case (Q6_SUBSYS_INVALID):
+		default:
+		{
+			ret = -EINVAL;
+			pr_err("%s: unknown dsp image\n", __func__);
+			break;
+		}
+		}
 		if (ret < 0)
 			pr_err("%s failed to disable the MCLK\n", __func__);
 		atomic_set(&pdata->mclk_enabled, false);
@@ -3172,19 +3110,6 @@ static int msm8952_asoc_machine_probe(struct platform_device *pdev)
 		pr_debug("%s:  doesn't support external speaker pa\n",
 				__func__);
 
-#if defined(CONFIG_BOARD_JASMINE)||defined(CONFIG_BOARD_GEVJON)
-	ret = msm8952_ext_spk_power_amp_init(pdev, pdata);
-	if (ret < 0)
-		pr_debug("%s: zhujb: doesn't init external speaker pa\n",
-				__func__);
-#endif
-#if defined(CONFIG_BOARD_JASMINE)||defined(CONFIG_BOARD_GEVJON)
-		ret = msm8952_ext_hds_power_amp_init(pdev, pdata);
-		if (ret < 0)
-			pr_debug("%s: zhujb: doesn't init external speaker pa\n",
-					__func__);
-#endif
-
 	ret = ext_audio_switch_support(pdev, pdata);
 	if (ret < 0)
 		dev_dbg(&pdev->dev, "%s: doesn't require ext audio switch support\n",
@@ -3211,6 +3136,19 @@ static int msm8952_asoc_machine_probe(struct platform_device *pdev)
 	pdata->digital_cdc_clk.clk_val = pdata->mclk_freq;
 	pdata->digital_cdc_clk.clk_root = 5;
 	pdata->digital_cdc_clk.reserved = 0;
+	/* initialize the digital codec core clk */
+	pdata->digital_cdc_core_clk.clk_set_minor_version =
+			AFE_API_VERSION_I2S_CONFIG;
+	pdata->digital_cdc_core_clk.clk_id =
+			Q6AFE_LPASS_CLK_ID_INTERNAL_DIGITAL_CODEC_CORE;
+	pdata->digital_cdc_core_clk.clk_freq_in_hz =
+			pdata->mclk_freq;
+	pdata->digital_cdc_core_clk.clk_attri =
+			Q6AFE_LPASS_CLK_ATTRIBUTE_COUPLE_NO;
+	pdata->digital_cdc_core_clk.clk_root =
+			Q6AFE_LPASS_CLK_ROOT_DEFAULT;
+	pdata->digital_cdc_core_clk.enable = 1;
+
 	/* Initialize loopback mode to false */
 	pdata->lb_mode = false;
 
@@ -3296,13 +3234,6 @@ static int msm8952_asoc_machine_remove(struct platform_device *pdev)
 		}
 		mutex_destroy(&pdata->wsa_mclk_mutex);
 	}
-
-#if defined(CONFIG_BOARD_JASMINE)||defined(CONFIG_BOARD_GEVJON)
-	if (gpio_is_valid(ext_spk_amp_gpio))
-		gpio_free(ext_spk_amp_gpio);
-	if (gpio_is_valid(ext_hds_amp_gpio))
-		gpio_free(ext_hds_amp_gpio);
-#endif
 	snd_soc_unregister_card(card);
 	mutex_destroy(&pdata->cdc_mclk_mutex);
 	return 0;

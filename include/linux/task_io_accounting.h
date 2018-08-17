@@ -18,6 +18,8 @@ struct task_io_accounting {
 	u64 syscr;
 	/* # of write syscalls */
 	u64 syscw;
+	/* # of fsync syscalls */
+	u64 syscfs;
 #endif /* CONFIG_TASK_XACCT */
 
 #ifdef CONFIG_TASK_IO_ACCOUNTING
@@ -32,9 +34,6 @@ struct task_io_accounting {
 	 * written to disk.
 	 */
 	u64 write_bytes;
-	
-	u64 last_read_bytes;
-	u64 last_write_bytes;
 
 	/*
 	 * A task can cause "negative" IO too.  If this task truncates some

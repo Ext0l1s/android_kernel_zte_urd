@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -18,6 +18,7 @@
 #include <linux/hrtimer.h>
 #include <linux/of_device.h>
 #include <linux/spmi.h>
+#include <linux/regulator/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/qpnp/pwm.h>
 #include <linux/err.h>
@@ -138,7 +139,7 @@
 #define QPNP_HAP_CYCLS			5
 #define QPNP_TEST_TIMER_MS		5
 
-#define AUTO_RES_ENABLE_TIMEOUT		20000
+#define QPNP_HAP_TIME_REQ_FOR_BACK_EMF_GEN 20000
 #define AUTO_RES_ERR_CAPTURE_RES	5
 #define AUTO_RES_ERR_MAX		15
 
@@ -247,6 +248,8 @@ struct qpnp_pwm_info {
  *  @ auto_res_mode - auto resonace mode
  *  @ lra_high_z - high z option line
  *  @ timeout_ms - max timeout in ms
+ *  @ time_required_to_generate_back_emf_us - the time required for sufficient
+      back-emf to be generated for auto resonance to be successful
  *  @ vmax_mv - max voltage in mv
  *  @ ilim_ma - limiting current in ma
  *  @ sc_deb_cycles - short circuit debounce cycles
@@ -280,6 +283,7 @@ struct qpnp_pwm_info {
  */
 struct qpnp_hap {
 	struct spmi_device *spmi;
+	struct regulator *vcc_pon;
 	struct hrtimer hap_timer;
 	struct hrtimer auto_res_err_poll_timer;
 	struct timed_output_dev timed_dev;
@@ -296,6 +300,7 @@ struct qpnp_hap {
 	enum qpnp_hap_auto_res_mode auto_res_mode;
 	enum qpnp_hap_high_z lra_high_z;
 	u32 timeout_ms;
+	u32 time_required_to_generate_back_emf_us;
 	u32 vmax_mv;
 	u32 ilim_ma;
 	u32 sc_deb_cycles;
@@ -317,10 +322,10 @@ struct qpnp_hap {
 	u8 lra_res_cal_period;
 	u8 sc_duration;
 	u8 ext_pwm_dtest_line;
-	//bool state;
-	u32 state;
+	bool state;
 	bool use_play_irq;
 	bool use_sc_irq;
+	bool manage_pon_supply;
 	bool wf_update;
 	bool pwm_cfg_state;
 	bool buffer_cfg_state;
@@ -329,9 +334,6 @@ struct qpnp_hap {
 	bool correct_lra_drive_freq;
 	bool misc_trim_error_rc19p2_clk_reg_present;
 };
-
-//export from zte_misc.c
-extern bool is_haptics_zte(void);
 
 static struct qpnp_hap *ghap;
 
@@ -1472,13 +1474,14 @@ static void correct_auto_res_error(struct work_struct *auto_res_err_work)
 		schedule_work(&hap->work);
 	}
 }
-#define BLUECOM_HAP_VMAX_MV		2900
+
 /* set api for haptics */
 static int qpnp_hap_set(struct qpnp_hap *hap, int on)
 {
 	int rc = 0;
 	u8 val = 0;
 	unsigned long timeout_ns = POLL_TIME_AUTO_RES_ERR_NS;
+	u32 back_emf_delay_us = hap->time_required_to_generate_back_emf_us;
 
 	if (hap->play_mode == QPNP_HAP_PWM) {
 		if (on)
@@ -1488,34 +1491,39 @@ static int qpnp_hap_set(struct qpnp_hap *hap, int on)
 	} else if (hap->play_mode == QPNP_HAP_BUFFER ||
 			hap->play_mode == QPNP_HAP_DIRECT) {
 		if (on) {
-			if (is_haptics_zte()) {//zte add
-				u32 max_mv = BLUECOM_HAP_VMAX_MV;
-				val = ((on & 0xFF0000)>>16);
-				max_mv = val * QPNP_HAP_VMAX_MIN_MV;
-				if (val > BLUECOM_HAP_VMAX_MV/QPNP_HAP_VMAX_MIN_MV)
-						max_mv = BLUECOM_HAP_VMAX_MV;
-				hap->vmax_mv = max_mv;
-				rc = qpnp_hap_vmax_config(hap);
-				//printk(KERN_ERR"%s: set hap voltage %d\n", __func__, max_mv);
-			}
+			/*
+			 * For auto resonance detection to work properly,
+			 * sufficient back-emf has to be generated. In general,
+			 * back-emf takes some time to build up. When the auto
+			 * resonance mode is chosen as QWD, high-z will be
+			 * applied for every LRA cycle and hence there won't be
+			 * enough back-emf at the start-up. Hence, the motor
+			 * needs to vibrate for few LRA cycles after the PLAY
+			 * bit is asserted. So disable the auto resonance here
+			 * and enable it after the sleep of
+			 * 'time_required_to_generate_back_emf_us' is completed.
+			 */
+			if (hap->correct_lra_drive_freq ||
+				hap->auto_res_mode == QPNP_HAP_AUTO_RES_QWD)
+				qpnp_hap_auto_res_enable(hap, 0);
+
 			rc = qpnp_hap_mod_enable(hap, on);
 			if (rc < 0)
 				return rc;
 
-			if (hap->correct_lra_drive_freq)
-				qpnp_hap_auto_res_enable(hap, 0);
-
 			rc = qpnp_hap_play(hap, on);
 
 			if (hap->act_type == QPNP_HAP_LRA &&
-					hap->correct_lra_drive_freq) {
-				usleep_range(AUTO_RES_ENABLE_TIMEOUT,
-					(AUTO_RES_ENABLE_TIMEOUT + 1));
-
+				(hap->correct_lra_drive_freq ||
+				hap->auto_res_mode == QPNP_HAP_AUTO_RES_QWD)) {
+				usleep_range(back_emf_delay_us,
+							back_emf_delay_us + 1);
 				rc = qpnp_hap_auto_res_enable(hap, 1);
 				if (rc < 0)
 					return rc;
-
+			}
+			if (hap->act_type == QPNP_HAP_LRA &&
+						hap->correct_lra_drive_freq) {
 				/*
 				 * Start timer to poll Auto Resonance error bit
 				 */
@@ -1557,11 +1565,6 @@ static void qpnp_hap_td_enable(struct timed_output_dev *dev, int value)
 					 timed_dev);
 
 	mutex_lock(&hap->lock);
-
-	if (hap->act_type == QPNP_HAP_LRA &&
-				hap->correct_lra_drive_freq)
-		hrtimer_cancel(&hap->auto_res_err_poll_timer);
-
 	hrtimer_cancel(&hap->hap_timer);
 
 	if (value == 0) {
@@ -1571,29 +1574,12 @@ static void qpnp_hap_td_enable(struct timed_output_dev *dev, int value)
 		}
 		hap->state = 0;
 	} else {
-		if (is_haptics_zte()) {
-			int vtg_value, timeout_value;
-
-			//printk(KERN_ERR"%s: value is %d, 0x%x\n", __func__, value, value);
-			vtg_value = value & 0xFF0000;
-			timeout_value = value & 0xFFFF;
-			if (vtg_value == 0 )
-				vtg_value = 0xF0000;/* 0xF: default value 0xF*116=1740mv */
-			timeout_value = ( timeout_value > hap->timeout_ms ?
-			hap->timeout_ms : timeout_value);
-			hap->state = 1 | vtg_value;
-
-			hrtimer_start(&hap->hap_timer,
-				  ktime_set(timeout_value / 1000, (timeout_value % 1000) * 1000000),
-				  HRTIMER_MODE_REL);
-		} else {
-			value = (value > hap->timeout_ms ?
-					 hap->timeout_ms : value);
-			hap->state = 1;
-			hrtimer_start(&hap->hap_timer,
-					  ktime_set(value / 1000, (value % 1000) * 1000000),
-					  HRTIMER_MODE_REL);
-		}
+		value = (value > hap->timeout_ms ?
+				 hap->timeout_ms : value);
+		hap->state = 1;
+		hrtimer_start(&hap->hap_timer,
+			      ktime_set(value / 1000, (value % 1000) * 1000000),
+			      HRTIMER_MODE_REL);
 	}
 	mutex_unlock(&hap->lock);
 	schedule_work(&hap->work);
@@ -1662,7 +1648,14 @@ static void qpnp_hap_worker(struct work_struct *work)
 	struct qpnp_hap *hap = container_of(work, struct qpnp_hap,
 					 work);
 	u8 val = 0x00;
-	int rc;
+	int rc, reg_en;
+
+	if (hap->vcc_pon) {
+		reg_en = regulator_enable(hap->vcc_pon);
+		if (reg_en)
+			pr_err("%s: could not enable vcc_pon regulator\n",
+				 __func__);
+	}
 
 	/* Disable haptics module if the duration of short circuit
 	 * exceeds the maximum limit (5 secs).
@@ -1674,6 +1667,13 @@ static void qpnp_hap_worker(struct work_struct *work)
 		if (hap->play_mode == QPNP_HAP_PWM)
 			qpnp_hap_mod_enable(hap, hap->state);
 		qpnp_hap_set(hap, hap->state);
+	}
+
+	if (hap->vcc_pon && !reg_en) {
+		rc = regulator_disable(hap->vcc_pon);
+		if (rc)
+			pr_err("%s: could not disable vcc_pon regulator\n",
+				 __func__);
 	}
 }
 
@@ -1733,8 +1733,9 @@ static SIMPLE_DEV_PM_OPS(qpnp_haptic_pm_ops, qpnp_haptic_suspend, NULL);
 /* Configuration api for haptics registers */
 static int qpnp_hap_config(struct qpnp_hap *hap)
 {
-	u8 reg = 0, error_code = 0, unlock_val, error_value;
-	int rc, i, temp;
+	u8 reg = 0, error_code = 0, unlock_val, rc_clk_err_percent_x10;
+	u32 temp;
+	int rc, i;
 
 	/* Configure the ACTUATOR TYPE register */
 	rc = qpnp_hap_read_reg(hap, &reg, QPNP_HAP_ACT_TYPE_REG(hap->base));
@@ -1865,11 +1866,12 @@ static int qpnp_hap_config(struct qpnp_hap *hap)
 	temp = hap->wave_play_rate_us / QPNP_HAP_RATE_CFG_STEP_US;
 
 	/*
-	 * The frequency of 19.2Mzhz RC clock is subject to variation.
-	 * In PMI8950, TRIM_ERROR_RC19P2_CLK register in MISC module
-	 * holds the frequency error in 19.2Mhz RC clock
+	 * The frequency of 19.2Mzhz RC clock is subject to variation. Currently
+	 * PMI8950 and PMI8937 modules have MISC_TRIM_ERROR_RC19P2_CLK register
+	 * present in the MISC  block. This register holds the frequency error
+	 * in 19.2Mhz RC clock.
 	 */
-	if ((hap->act_type == QPNP_HAP_LRA) && hap->correct_lra_drive_freq
+	if (hap->act_type == QPNP_HAP_LRA
 			&& hap->misc_trim_error_rc19p2_clk_reg_present) {
 		unlock_val = MISC_SEC_UNLOCK;
 		rc = spmi_ext_register_writel(hap->spmi->ctrl,
@@ -1882,12 +1884,24 @@ static int qpnp_hap_config(struct qpnp_hap *hap)
 		spmi_ext_register_readl(hap->spmi->ctrl, PMI8950_MISC_SID,
 			 MISC_TRIM_ERROR_RC19P2_CLK, &error_code, 1);
 
-		error_value = (error_code & 0x0F) * 7;
+		rc_clk_err_percent_x10 = (error_code & 0x0F) * 7;
 
-		if (error_code & 0x80)
-			temp = (temp * (1000 - error_value)) / 1000;
+		/*
+		 * If the TRIM register holds value less than 0x80,
+		 * then there is a positive error in the RC clock.
+		 * If the TRIM register holds value greater than or equal to
+		 * 0x80, then there is a negative error in the RC clock.
+		 * The adjusted play rate code is calculated as follows:
+		 * LRA_drive_period_code = (200Khz * (1+%error/100)) / LRA_freq
+		 */
+		if (error_code >= 128)
+			temp = (temp * (1000 - rc_clk_err_percent_x10)) / 1000;
 		else
-			temp = (temp * (1000 + error_value)) / 1000;
+			temp = (temp * (1000 + rc_clk_err_percent_x10)) / 1000;
+
+		dev_dbg(&hap->spmi->dev,
+			"TRIM register = 0x%x Play rate code after RC clock correction 0x%x\n",
+					error_code, temp);
 	}
 
 	reg = temp & QPNP_HAP_RATE_CFG1_MASK;
@@ -2064,6 +2078,19 @@ static int qpnp_hap_parse_dt(struct qpnp_hap *hap)
 		hap->misc_trim_error_rc19p2_clk_reg_present =
 				of_property_read_bool(spmi->dev.of_node,
 				"qcom,misc-trim-error-rc19p2-clk-reg-present");
+
+		if (hap->auto_res_mode == QPNP_HAP_AUTO_RES_QWD) {
+			hap->time_required_to_generate_back_emf_us =
+					QPNP_HAP_TIME_REQ_FOR_BACK_EMF_GEN;
+			rc = of_property_read_u32(spmi->dev.of_node,
+				"qcom,time-required-to-generate-back-emf-us",
+				&temp);
+			if (!rc)
+				hap->time_required_to_generate_back_emf_us =
+									temp;
+		} else {
+			hap->time_required_to_generate_back_emf_us = 0;
+		}
 	}
 
 	rc = of_property_read_string(spmi->dev.of_node,
@@ -2190,6 +2217,9 @@ static int qpnp_hap_parse_dt(struct qpnp_hap *hap)
 		}
 	}
 
+	if (of_find_property(spmi->dev.of_node, "vcc_pon-supply", NULL))
+		hap->manage_pon_supply = true;
+
 	return 0;
 }
 
@@ -2197,6 +2227,7 @@ static int qpnp_haptic_probe(struct spmi_device *spmi)
 {
 	struct qpnp_hap *hap;
 	struct resource *hap_resource;
+	struct regulator *vcc_pon;
 	int rc, i;
 
 	hap = devm_kzalloc(&spmi->dev, sizeof(*hap), GFP_KERNEL);
@@ -2218,15 +2249,6 @@ static int qpnp_haptic_probe(struct spmi_device *spmi)
 	if (rc) {
 		dev_err(&spmi->dev, "DT parsing failed\n");
 		return rc;
-	}
-
-	pr_info("Haptics: sw:act_type=%s hw:is_haptics=%d(%s)\n", (hap->act_type==QPNP_HAP_LRA)?"LRA":"ERM", is_haptics_zte(), is_haptics_zte()?"LRA":"ERM");
-	if ((hap->act_type != QPNP_HAP_LRA) && (is_haptics_zte())) {
-		pr_info("Haptics: found LRA hw, but sw not support LRA, act_type=%s\n", (hap->act_type==QPNP_HAP_LRA)?"LRA":"ERM");
-		return -EINVAL;
-	} else if ((hap->act_type == QPNP_HAP_LRA) && (!is_haptics_zte())) {
-		pr_info("Haptics: found ERM hw, but sw not support ERM, act_type=%s\n", (hap->act_type==QPNP_HAP_LRA)?"LRA":"ERM");
-		return -EINVAL;
 	}
 
 	rc = qpnp_hap_config(hap);
@@ -2273,6 +2295,17 @@ static int qpnp_haptic_probe(struct spmi_device *spmi)
 		}
 	}
 
+	if (hap->manage_pon_supply) {
+		vcc_pon = regulator_get(&spmi->dev, "vcc_pon");
+		if (IS_ERR(vcc_pon)) {
+			rc = PTR_ERR(vcc_pon);
+			dev_err(&spmi->dev,
+				"regulator get failed vcc_pon rc=%d\n", rc);
+			goto sysfs_fail;
+		}
+		hap->vcc_pon = vcc_pon;
+	}
+
 	ghap = hap;
 
 	return 0;
@@ -2309,6 +2342,8 @@ static int qpnp_haptic_remove(struct spmi_device *spmi)
 	timed_output_dev_unregister(&hap->timed_dev);
 	mutex_destroy(&hap->lock);
 	mutex_destroy(&hap->wf_lock);
+	if (hap->vcc_pon)
+		regulator_put(hap->vcc_pon);
 
 	return 0;
 }

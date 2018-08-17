@@ -32,13 +32,6 @@
 #include "q6voice.h"
 #include "audio_ocmem.h"
 
-#if defined(CONFIG_AK4961_CODEC)
-// chenjun:use AK4961's RX volume control.
-extern int ak4961_internal_rx_gain_set(struct snd_kcontrol *kcontrol,
-       struct snd_ctl_elem_value *ucontrol);
-//
-#endif
-
 #define SHARED_MEM_BUF 2
 #define VOIP_MAX_Q_LEN 10
 #define VOIP_MAX_VOC_PKT_SIZE 4096
@@ -261,12 +254,6 @@ static int msm_voip_gain_put(struct snd_kcontrol *kcontrol,
 
 	pr_debug("%s: volume: %d ramp_duration: %d\n", __func__, volume,
 		ramp_duration);
-	
-#if defined(CONFIG_AK4961_CODEC)
-// chenjun:use AK4961's RX volume control.
-	ak4961_internal_rx_gain_set(kcontrol, ucontrol);
-//
-#endif
 
 	voc_set_rx_vol_step(voc_get_session_id(VOIP_SESSION_NAME),
 						RX_PATH,
@@ -683,7 +670,7 @@ static void voip_process_dl_pkt(uint8_t *voc_pkt, void *private_data)
 	} else {
 		*((uint32_t *)voc_pkt) = 0;
 		spin_unlock_irqrestore(&prtd->dsp_lock, dsp_flags);
-		pr_err("DL data not available\n");
+		pr_err_ratelimited("DL data not available\n");
 	}
 	wake_up(&prtd->in_wait);
 }
@@ -840,6 +827,11 @@ static int msm_pcm_playback_copy(struct snd_pcm_substream *substream, int a,
 					(sizeof(buf_node->frame.frm_hdr) +
 					 sizeof(buf_node->frame.pktlen));
 			}
+			if (ret) {
+				pr_err("%s: copy from user failed %d\n",
+				       __func__, ret);
+				return -EFAULT;
+			}
 			spin_lock_irqsave(&prtd->dsp_lock, dsp_flags);
 			list_add_tail(&buf_node->list, &prtd->in_queue);
 			spin_unlock_irqrestore(&prtd->dsp_lock, dsp_flags);
@@ -927,7 +919,7 @@ static int msm_pcm_capture_copy(struct snd_pcm_substream *substream,
 
 
 	} else if (ret == 0) {
-		pr_err("%s: No UL data available\n", __func__);
+		pr_err_ratelimited("%s: No UL data available\n", __func__);
 		ret = -ETIMEDOUT;
 	} else {
 		pr_err("%s: Read was interrupted\n", __func__);

@@ -57,13 +57,7 @@ static int dapm_up_seq[] = {
 	[snd_soc_dapm_dai_link] = 2,
 	[snd_soc_dapm_dai_in] = 3,
 	[snd_soc_dapm_dai_out] = 3,
-#if defined(CONFIG_AK4961_CODEC)
-	[snd_soc_dapm_pga] = 3,
-	[snd_soc_dapm_adc] = 4,	
-#else
 	[snd_soc_dapm_adc] = 3,
-	[snd_soc_dapm_pga] = 8,
-#endif	
 	[snd_soc_dapm_mic] = 4,
 	[snd_soc_dapm_mux] = 5,
 	[snd_soc_dapm_virt_mux] = 5,
@@ -71,6 +65,7 @@ static int dapm_up_seq[] = {
 	[snd_soc_dapm_dac] = 6,
 	[snd_soc_dapm_mixer] = 7,
 	[snd_soc_dapm_mixer_named_ctl] = 7,
+	[snd_soc_dapm_pga] = 8,
 	[snd_soc_dapm_aif_in] = 8,
 	[snd_soc_dapm_aif_out] = 8,
 	[snd_soc_dapm_out_drv] = 10,
@@ -84,11 +79,7 @@ static int dapm_down_seq[] = {
 	[snd_soc_dapm_pre] = 0,
 	[snd_soc_dapm_aif_in] = 1,
 	[snd_soc_dapm_aif_out] = 1,
-#if defined(CONFIG_AK4961_CODEC)
-	[snd_soc_dapm_adc] = 3,
-#else 
 	[snd_soc_dapm_adc] = 5,
-#endif
 	[snd_soc_dapm_hp] = 2,
 	[snd_soc_dapm_spk] = 2,
 	[snd_soc_dapm_line] = 2,
@@ -2184,7 +2175,7 @@ static int snd_soc_dapm_set_pin(struct snd_soc_dapm_context *dapm,
 {
 	struct snd_soc_dapm_widget *w = dapm_find_widget(dapm, pin, true);
 
-	mutex_lock_nested(&dapm->card->dapm_mutex, SND_SOC_DAPM_CLASS_PCM);
+	mutex_lock_nested(&dapm->card->dapm_mutex, SND_SOC_DAPM_CLASS_RUNTIME);
 	if (!w) {
 		dev_err(dapm->dev, "ASoC: DAPM unknown pin %s\n", pin);
 		mutex_unlock(&dapm->card->dapm_mutex);
@@ -3611,7 +3602,7 @@ int snd_soc_dapm_force_enable_pin(struct snd_soc_dapm_context *dapm,
 {
 	struct snd_soc_dapm_widget *w = dapm_find_widget(dapm, pin, true);
 
-	mutex_lock_nested(&dapm->card->dapm_mutex, SND_SOC_DAPM_CLASS_PCM);
+	mutex_lock_nested(&dapm->card->dapm_mutex, SND_SOC_DAPM_CLASS_RUNTIME);
 	if (!w) {
 		dev_err(dapm->dev, "ASoC: unknown pin %s\n", pin);
 		mutex_unlock(&dapm->card->dapm_mutex);

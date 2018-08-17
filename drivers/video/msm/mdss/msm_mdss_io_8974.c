@@ -19,6 +19,7 @@
 
 #include "mdss_dsi.h"
 #include "mdss_edp.h"
+#include "mdss_dsi_phy.h"
 
 #define MDSS_DSI_DSIPHY_REGULATOR_CTRL_0	0x00
 #define MDSS_DSI_DSIPHY_REGULATOR_CTRL_1	0x04
@@ -186,26 +187,7 @@ static void mdss_dsi_28nm_phy_regulator_enable(
 				+ 0x18, pd->regulator[6]);
 		/* Add H/w recommended delay */
 		udelay(1000);
-	#if defined( CONFIG_BOARD_URD)  //only for P895T20 ,set DC-DC from 0.415v to 0.385v for mipi test
 		/* Regulator ctrl 1 */
-		MIPI_OUTP((ctrl_pdata->phy_regulator_io.base)
-				+ 0x4, pd->regulator[1]);
-		/* Regulator ctrl 2 */
-		MIPI_OUTP((ctrl_pdata->phy_regulator_io.base)
-				+ 0x8, 5);
-		/* Regulator ctrl 3 */
-		MIPI_OUTP((ctrl_pdata->phy_regulator_io.base)
-				+ 0xc, pd->regulator[3]);
-		/* Regulator ctrl 4 */
-		MIPI_OUTP((ctrl_pdata->phy_regulator_io.base)
-				+ 0x10, pd->regulator[4]);
-		/* LDO ctrl */
-		MIPI_OUTP((ctrl_pdata->phy_io.base) + 0x1dc, 0x00);
-		/* Regulator ctrl 0 */
-		MIPI_OUTP(ctrl_pdata->phy_regulator_io.base,
-				5);
-	#else
-				/* Regulator ctrl 1 */
 		MIPI_OUTP((ctrl_pdata->phy_regulator_io.base)
 				+ 0x4, pd->regulator[1]);
 		/* Regulator ctrl 2 */
@@ -222,7 +204,6 @@ static void mdss_dsi_28nm_phy_regulator_enable(
 		/* Regulator ctrl 0 */
 		MIPI_OUTP(ctrl_pdata->phy_regulator_io.base,
 				pd->regulator[0]);
-	#endif
 	}
 }
 
@@ -383,6 +364,8 @@ static void mdss_dsi_phy_regulator_ctrl(struct mdss_dsi_ctrl_pdata *ctrl,
 {
 	struct mdss_dsi_ctrl_pdata *other_ctrl;
 	struct dsi_shared_data *sdata;
+	struct mdss_panel_data *pdata;
+	struct mdss_panel_info *pinfo;
 
 	if (!ctrl) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -391,6 +374,8 @@ static void mdss_dsi_phy_regulator_ctrl(struct mdss_dsi_ctrl_pdata *ctrl,
 
 	sdata = ctrl->shared_data;
 	other_ctrl = mdss_dsi_get_other_ctrl(ctrl);
+	pdata = &ctrl->panel_data;
+	pinfo = &pdata->panel_info;
 
 	mutex_lock(&sdata->phy_reg_lock);
 	if (enable) {
@@ -403,6 +388,8 @@ static void mdss_dsi_phy_regulator_ctrl(struct mdss_dsi_ctrl_pdata *ctrl,
 			 * other dsi controller is still active.
 			 */
 			if (mdss_dsi_is_hw_config_single(sdata) ||
+				(mdss_dsi_is_ctrl_clk_master(ctrl) &&
+					pinfo->ulps_suspend_enabled) ||
 				(other_ctrl && !other_ctrl->is_phyreg_enabled))
 				mdss_dsi_28nm_phy_regulator_enable(ctrl);
 		}
@@ -519,6 +506,76 @@ void mdss_dsi_core_clk_deinit(struct device *dev, struct dsi_shared_data *sdata)
 		devm_clk_put(dev, sdata->tbu_clk);
 	if (sdata->tbu_rt_clk)
 		devm_clk_put(dev, sdata->tbu_rt_clk);
+}
+
+int mdss_dsi_clk_refresh(struct mdss_panel_data *pdata, bool update_phy)
+{
+	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+	struct mdss_panel_info *pinfo = NULL;
+	u32 pclk_rate = 0, byte_clk_rate = 0;
+	u8 frame_rate = 0;
+	int rc = 0;
+
+	if (!pdata) {
+		pr_err("%s: invalid panel data\n", __func__);
+		return -EINVAL;
+	}
+
+	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
+							panel_data);
+	pinfo = &pdata->panel_info;
+
+	if (!ctrl_pdata || !pinfo) {
+		pr_err("%s: invalid ctrl data\n", __func__);
+		return -EINVAL;
+	}
+
+	/* Back-up current values for error cases */
+	frame_rate = pinfo->mipi.frame_rate;
+	pclk_rate = ctrl_pdata->pclk_rate;
+	byte_clk_rate = ctrl_pdata->byte_clk_rate;
+
+	if (update_phy) {
+		pinfo->mipi.frame_rate = mdss_panel_calc_frame_rate(pinfo);
+		pr_debug("%s: new frame rate %d\n",
+				__func__, pinfo->mipi.frame_rate);
+	}
+
+	rc = mdss_dsi_clk_div_config(&pdata->panel_info,
+			pdata->panel_info.mipi.frame_rate);
+	if (rc) {
+		pr_err("%s: unable to initialize the clk dividers\n",
+								__func__);
+		goto error;
+	}
+	ctrl_pdata->pclk_rate = pdata->panel_info.mipi.dsi_pclk_rate;
+	ctrl_pdata->byte_clk_rate = pdata->panel_info.clk_rate / 8;
+	pr_debug("%s ctrl_pdata->byte_clk_rate=%d ctrl_pdata->pclk_rate=%d\n",
+		__func__, ctrl_pdata->byte_clk_rate, ctrl_pdata->pclk_rate);
+
+	if (update_phy) {
+		/* phy panel timing calaculation */
+		mdss_dsi_get_phy_revision(ctrl_pdata);
+		rc = mdss_dsi_phy_calc_timing_param(pinfo,
+				ctrl_pdata->shared_data->phy_rev,
+				pinfo->mipi.frame_rate);
+		if (rc) {
+			pr_err("Error in calculating phy timings\n");
+			goto error;
+		}
+		ctrl_pdata->update_phy_timing = false;
+	}
+
+	ctrl_pdata->refresh_clk_rate = false;
+	return 0;
+
+error:
+	/* Restore previous values before exiting */
+	pinfo->mipi.frame_rate = frame_rate;
+	ctrl_pdata->pclk_rate = pclk_rate;
+	ctrl_pdata->byte_clk_rate = byte_clk_rate;
+	ctrl_pdata->refresh_clk_rate = false;
+	return rc;
 }
 
 int mdss_dsi_core_clk_init(struct platform_device *pdev,
